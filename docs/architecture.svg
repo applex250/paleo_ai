@@ -1,0 +1,235 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 840" text-rendering="geometricPrecision" font-family='ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif'>
+  <title>AI 中台服务平台 · 当前架构图</title>
+  <desc>纯前端原型架构图：浏览器入口 → React 挂载 → 路由 → 布局 → 8 个页面模块 → 本地 Mock 数据层；后端为待建（虚线）。</desc>
+
+  <defs>
+    <style>
+      .panel{fill:#f8fafc;stroke:#e2e8f0;stroke-width:1}
+      .node{fill:#ffffff;stroke:#e2e8f0;stroke-width:1}
+      .core{fill:#eff6ff;stroke:#bfdbfe;stroke-width:1}
+      .mock{fill:#fffbeb;stroke:#fcd34d;stroke-width:1}
+      .hi{fill:#ffffff;stroke:#6ee7b7;stroke-width:1.6}
+      .future{fill:#ffffff;stroke:#cbd5e1;stroke-width:1.4;stroke-dasharray:7 5}
+      .dep{fill:#f1f5f9;stroke:#e2e8f0;stroke-width:1}
+      .line{stroke:#94a3b8;stroke-width:1.4;fill:none}
+      .line-b{stroke:#3b82f6;stroke-width:1.7;fill:none}
+      .line-d{stroke:#cbd5e1;stroke-width:1.4;fill:none;stroke-dasharray:5 4}
+      .t-h1{font-size:22px;font-weight:700;fill:#0f172a}
+      .t-sub{font-size:12.5px;fill:#64748b}
+      .t-layer{font-size:11px;font-weight:700;fill:#94a3b8;letter-spacing:1.5px}
+      .t-node{font-size:13px;font-weight:700;fill:#0f172a}
+      .t-sub2{font-size:10.5px;fill:#475569}
+      .t-mute{font-size:10.5px;fill:#94a3b8}
+      .t-mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px;fill:#334155}
+      .t-mono-s{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:9.5px;fill:#94a3b8}
+      .t-tag{font-size:10px;fill:#64748b}
+      .t-edge{font-size:10px;fill:#64748b}
+      .t-edge-b{font-size:10px;fill:#2563eb;font-weight:600}
+      .t-future{font-size:12px;font-weight:600;fill:#94a3b8}
+    </style>
+    <filter id="sh" x="-10%" y="-10%" width="120%" height="135%">
+      <feDropShadow dx="0" dy="1.5" stdDeviation="2" flood-color="#0f172a" flood-opacity="0.07"/>
+    </filter>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker>
+    <marker id="ahb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#3b82f6"/></marker>
+    <marker id="ahd" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#cbd5e1"/></marker>
+  </defs>
+
+  <rect width="1280" height="840" fill="#ffffff"/>
+
+  <!-- 标题 -->
+  <text class="t-h1" x="40" y="36">AI 中台服务平台 · 当前架构图</text>
+  <text class="t-sub" x="40" y="58">纯前端原型 · React 18 + TypeScript + Vite · 所有数据来自本地 Mock，无真实后端</text>
+
+  <!-- ① 浏览器入口 -->
+  <rect class="panel" x="40" y="74" width="1200" height="70" rx="10"/>
+  <text class="t-layer" x="56" y="93">① 浏览器入口</text>
+  <g filter="url(#sh)">
+    <rect class="core" x="300" y="100" width="680" height="38" rx="8"/>
+    <text class="t-mono" x="640" y="124" text-anchor="middle">index.html   ·   Tailwind (CDN)   ·   importmap → aistudiocdn   ·   &lt;div id="root"&gt;</text>
+  </g>
+
+  <!-- ② React 挂载 -->
+  <text class="t-layer" x="56" y="184">② React 挂载</text>
+  <g filter="url(#sh)">
+    <rect class="node" x="470" y="160" width="340" height="34" rx="8"/>
+    <text class="t-mono" x="640" y="182" text-anchor="middle">index.tsx   ·   ReactDOM.createRoot(#root).render(&lt;App/&gt;)</text>
+  </g>
+
+  <!-- ③ 路由 -->
+  <text class="t-layer" x="56" y="234">③ 路由</text>
+  <g filter="url(#sh)">
+    <rect class="core" x="360" y="210" width="560" height="38" rx="8"/>
+    <text class="t-mono" x="640" y="234" text-anchor="middle">App.tsx   ·   &lt;HashRouter&gt;&lt;Routes&gt;   →   &lt;Layout/&gt; + &lt;Outlet/&gt;   (8 条路由)</text>
+  </g>
+
+  <!-- ④ 布局 -->
+  <text class="t-layer" x="56" y="258">④ 布局</text>
+  <g filter="url(#sh)">
+    <rect class="node" x="60" y="266" width="320" height="66" rx="8"/>
+    <text class="t-node" x="76" y="287">Sidebar</text>
+    <text class="t-sub2" x="76" y="304">8 个 NavLink 导航项 · 当前项高亮</text>
+    <text class="t-mute" x="76" y="320">「系统设置」未接功能</text>
+  </g>
+  <g filter="url(#sh)">
+    <rect class="node" x="400" y="266" width="800" height="66" rx="8"/>
+    <text class="t-node" x="416" y="287">Layout</text>
+    <text class="t-sub2" x="416" y="304">顶栏：搜索框 · 通知铃铛 · 用户「管理员」（均为静态展示）</text>
+    <text class="t-mute" x="416" y="320">&lt;Outlet/&gt;  渲染当前路由对应的页面模块</text>
+  </g>
+
+  <!-- ⑤ 视图层（8 个页面模块） -->
+  <rect class="panel" x="40" y="348" width="1200" height="140" rx="10"/>
+  <text class="t-layer" x="56" y="367">⑤ 视图层 · 8 个页面模块（每条路由一个）</text>
+
+  <!-- 8 张卡片 -->
+  <g filter="url(#sh)">
+    <!-- Dashboard -->
+    <rect class="node" x="50" y="378" width="140" height="110" rx="10"/>
+    <circle cx="120" cy="396" r="3.5" fill="#f59e0b"/>
+    <text class="t-node" x="120" y="422" text-anchor="middle">平台总览</text>
+    <text class="t-mono-s" x="120" y="440" text-anchor="middle">Dashboard</text>
+    <text class="t-mono-s" x="120" y="456" text-anchor="middle">/</text>
+    <line x1="70" y1="468" x2="170" y2="468" stroke="#f1f5f9"/>
+    <circle cx="92" cy="480" r="3" fill="#f59e0b"/><text class="t-tag" x="100" y="483">指标写死</text>
+    <!-- DataManager -->
+    <rect class="node" x="200" y="378" width="140" height="110" rx="10"/>
+    <circle cx="270" cy="396" r="3.5" fill="#f59e0b"/>
+    <text class="t-node" x="270" y="422" text-anchor="middle">数据管理</text>
+    <text class="t-mono-s" x="270" y="440" text-anchor="middle">DataManager</text>
+    <text class="t-mono-s" x="270" y="456" text-anchor="middle">/data</text>
+    <line x1="220" y1="468" x2="320" y2="468" stroke="#f1f5f9"/>
+    <circle cx="238" cy="480" r="3" fill="#f59e0b"/><text class="t-tag" x="246" y="483">接入表可用</text>
+    <!-- Annotation (核心·可交互) -->
+    <rect class="hi" x="350" y="378" width="140" height="110" rx="10"/>
+    <circle cx="420" cy="396" r="3.5" fill="#10b981"/>
+    <text class="t-node" x="420" y="422" text-anchor="middle">数据标注</text>
+    <text class="t-mono-s" x="420" y="440" text-anchor="middle">Annotation</text>
+    <text class="t-mono-s" x="420" y="456" text-anchor="middle">/annotation</text>
+    <line x1="370" y1="468" x2="470" y2="468" stroke="#d1fae5"/>
+    <circle cx="382" cy="480" r="3" fill="#10b981"/><text class="t-tag" x="390" y="483" fill="#047857" font-weight="600">可交互 ★</text>
+    <!-- Training -->
+    <rect class="node" x="500" y="378" width="140" height="110" rx="10"/>
+    <circle cx="570" cy="396" r="3.5" fill="#f59e0b"/>
+    <text class="t-node" x="570" y="422" text-anchor="middle">模型训练</text>
+    <text class="t-mono-s" x="570" y="440" text-anchor="middle">Training</text>
+    <text class="t-mono-s" x="570" y="456" text-anchor="middle">/training</text>
+    <line x1="520" y1="468" x2="620" y2="468" stroke="#f1f5f9"/>
+    <circle cx="538" cy="480" r="3" fill="#f59e0b"/><text class="t-tag" x="546" y="483">按钮无响应</text>
+    <!-- Evaluation -->
+    <rect class="node" x="650" y="378" width="140" height="110" rx="10"/>
+    <circle cx="720" cy="396" r="3.5" fill="#f59e0b"/>
+    <text class="t-node" x="720" y="422" text-anchor="middle">模型评估</text>
+    <text class="t-mono-s" x="720" y="440" text-anchor="middle">Evaluation</text>
+    <text class="t-mono-s" x="720" y="456" text-anchor="middle">/evaluation</text>
+    <line x1="670" y1="468" x2="770" y2="468" stroke="#f1f5f9"/>
+    <circle cx="688" cy="480" r="3" fill="#f59e0b"/><text class="t-tag" x="696" y="483">数据写死</text>
+    <!-- ModelRegistry -->
+    <rect class="node" x="800" y="378" width="140" height="110" rx="10"/>
+    <circle cx="870" cy="396" r="3.5" fill="#f59e0b"/>
+    <text class="t-node" x="870" y="422" text-anchor="middle">模型注册</text>
+    <text class="t-mono-s" x="870" y="440" text-anchor="middle">ModelRegistry</text>
+    <text class="t-mono-s" x="870" y="456" text-anchor="middle">/models</text>
+    <line x1="820" y1="468" x2="920" y2="468" stroke="#f1f5f9"/>
+    <circle cx="842" cy="480" r="3" fill="#f59e0b"/><text class="t-tag" x="850" y="483">仅展示</text>
+    <!-- Serving -->
+    <rect class="node" x="950" y="378" width="140" height="110" rx="10"/>
+    <circle cx="1020" cy="396" r="3.5" fill="#f59e0b"/>
+    <text class="t-node" x="1020" y="422" text-anchor="middle">推理服务</text>
+    <text class="t-mono-s" x="1020" y="440" text-anchor="middle">Serving</text>
+    <text class="t-mono-s" x="1020" y="456" text-anchor="middle">/serving</text>
+    <line x1="970" y1="468" x2="1070" y2="468" stroke="#f1f5f9"/>
+    <circle cx="992" cy="480" r="3" fill="#f59e0b"/><text class="t-tag" x="1000" y="483">假返回</text>
+    <!-- Monitoring -->
+    <rect class="node" x="1100" y="378" width="140" height="110" rx="10"/>
+    <circle cx="1170" cy="396" r="3.5" fill="#f59e0b"/>
+    <text class="t-node" x="1170" y="422" text-anchor="middle">监控日志</text>
+    <text class="t-mono-s" x="1170" y="440" text-anchor="middle">Monitoring</text>
+    <text class="t-mono-s" x="1170" y="456" text-anchor="middle">/monitoring</text>
+    <line x1="1120" y1="468" x2="1220" y2="468" stroke="#f1f5f9"/>
+    <circle cx="1142" cy="480" r="3" fill="#f59e0b"/><text class="t-tag" x="1150" y="483">随机数</text>
+  </g>
+
+  <!-- ⑥ 数据层 -->
+  <rect class="panel" x="40" y="504" width="1200" height="104" rx="10"/>
+  <text class="t-layer" x="56" y="523">⑥ 数据层（前端本地 · 无后端）</text>
+  <g filter="url(#sh)">
+    <rect class="node" x="300" y="530" width="300" height="64" rx="8"/>
+    <text class="t-node" x="316" y="551">types.ts</text>
+    <text class="t-sub2" x="316" y="568">Dataset · AnnotationTask · TrainingJob</text>
+    <text class="t-mute" x="316" y="584">ModelVersion · JobStatus（枚举）</text>
+  </g>
+  <g filter="url(#sh)">
+    <rect class="mock" x="680" y="530" width="300" height="64" rx="8"/>
+    <text class="t-node" x="696" y="551">services / mockApi.ts</text>
+    <text class="t-sub2" x="696" y="568">4 个写死数组（数据集 / 标注 / 训练 / 模型）</text>
+    <text class="t-mute" x="696" y="584">⚠ 所有列表数据来源 · 刷新不丢但不持久化</text>
+  </g>
+
+  <!-- ⑦ 待建后端 -->
+  <rect class="future" x="200" y="624" width="880" height="78" rx="10"/>
+  <text class="t-layer" x="216" y="643">⑦ 待建设（虚线 = 尚未实现）</text>
+  <text class="t-future" x="640" y="666" text-anchor="middle">后端服务 · 数据库 · 训练调度器 · 模型推理服务</text>
+  <text class="t-mute" x="640" y="686" text-anchor="middle">标注持久化 / 真实数据 / 训练执行 / 在线推理 / 监控采集   →   待接入</text>
+
+  <!-- 外部依赖 -->
+  <text class="t-layer" x="40" y="728">外部依赖（CDN / npm 引入）</text>
+  <g filter="url(#sh)">
+    <rect class="dep" x="60" y="738" width="370" height="54" rx="8"/>
+    <text class="t-node" x="76" y="759">Recharts</text>
+    <text class="t-sub2" x="76" y="776">图表  →  Dashboard · Evaluation · Monitoring</text>
+  </g>
+  <g filter="url(#sh)">
+    <rect class="dep" x="455" y="738" width="370" height="54" rx="8"/>
+    <text class="t-node" x="471" y="759">lucide-react</text>
+    <text class="t-sub2" x="471" y="776">图标  →  全局所有页面</text>
+  </g>
+  <g filter="url(#sh)">
+    <rect class="dep" x="850" y="738" width="370" height="54" rx="8"/>
+    <text class="t-node" x="866" y="759">Tailwind CSS</text>
+    <text class="t-sub2" x="866" y="776">样式  →  index.html 以 CDN 引入（非本地构建）</text>
+  </g>
+
+  <!-- ===== 连接线 ===== -->
+  <!-- 入口 → 挂载 → 路由 -->
+  <line class="line" x1="640" y1="138" x2="640" y2="160" marker-end="url(#ah)"/>
+  <line class="line" x1="640" y1="194" x2="640" y2="210" marker-end="url(#ah)"/>
+  <!-- 路由 → 布局(Layout) -->
+  <polyline class="line" points="640,248 640,258 800,258 800,266" marker-end="url(#ah)"/>
+  <text class="t-edge" x="712" y="253">路由 element</text>
+  <!-- Layout import Sidebar -->
+  <line class="line" x1="400" y1="299" x2="382" y2="299" marker-end="url(#ah)"/>
+  <text class="t-edge" x="386" y="292">import</text>
+  <!-- Layout Outlet → 页面干线 -->
+  <line class="line" x1="800" y1="332" x2="800" y2="360"/>
+  <line class="line" x1="120" y1="360" x2="1170" y2="360"/>
+  <line class="line" x1="120" y1="360" x2="120" y2="378" marker-end="url(#ah)"/>
+  <line class="line" x1="270" y1="360" x2="270" y2="378" marker-end="url(#ah)"/>
+  <line class="line" x1="420" y1="360" x2="420" y2="378" marker-end="url(#ah)"/>
+  <line class="line" x1="570" y1="360" x2="570" y2="378" marker-end="url(#ah)"/>
+  <line class="line" x1="720" y1="360" x2="720" y2="378" marker-end="url(#ah)"/>
+  <line class="line" x1="870" y1="360" x2="870" y2="378" marker-end="url(#ah)"/>
+  <line class="line" x1="1020" y1="360" x2="1020" y2="378" marker-end="url(#ah)"/>
+  <line class="line" x1="1170" y1="360" x2="1170" y2="378" marker-end="url(#ah)"/>
+  <text class="t-edge" x="640" y="354">&lt;Outlet/&gt; 渲染当前路由页面</text>
+  <!-- 数据 → 页面（向上：页面 import 这些） -->
+  <line class="line-b" x1="830" y1="530" x2="830" y2="496" marker-end="url(#ahb)"/>
+  <text class="t-edge-b" x="840" y="515">import 列表数据</text>
+  <line class="line-d" x1="450" y1="530" x2="450" y2="496" marker-end="url(#ahd)"/>
+  <text class="t-edge" x="318" y="515">类型引用</text>
+  <!-- Mock → 待建后端（向下：待连接） -->
+  <line class="line-d" x1="830" y1="594" x2="830" y2="624" marker-end="url(#ahd)"/>
+  <text class="t-edge" x="840" y="614">待连接</text>
+
+  <!-- 图例 -->
+  <g>
+    <line class="line-b" x1="60" y1="816" x2="96" y2="816" marker-end="url(#ahb)"/>
+    <text class="t-tag" x="104" y="820">数据 import</text>
+    <line class="line" x1="220" y1="816" x2="256" y2="816" marker-end="url(#ah)"/>
+    <text class="t-tag" x="264" y="820">渲染 / 挂载</text>
+    <line class="line-d" x1="380" y1="816" x2="416" y2="816" marker-end="url(#ahd)"/>
+    <text class="t-tag" x="424" y="820">类型引用 / 待连接</text>
+    <circle cx="580" cy="816" r="4" fill="#10b981"/><text class="t-tag" x="590" y="820">可交互</text>
+    <circle cx="660" cy="816" r="4" fill="#f59e0b"/><text class="t-tag" x="670" y="820">仅展示 / 部分</text>
+  </g>
+</svg>

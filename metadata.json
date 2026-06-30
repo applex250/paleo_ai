@@ -1,0 +1,5 @@
+{
+  "name": "AI Ops Platform",
+  "description": "A comprehensive AI Service Capabilities Construction Platform prototype featuring data management, annotation, training monitoring, and model serving.",
+  "requestFramePermissions": []
+}

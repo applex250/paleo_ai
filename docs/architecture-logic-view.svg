@@ -1,0 +1,254 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 1110" font-family="'Segoe UI','Microsoft YaHei','PingFang SC',sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#64748b"/>
+    </marker>
+    <marker id="arrowDash" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#ef4444"/>
+    </marker>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#0f172a" flood-opacity="0.10"/>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1440" height="1110" fill="#f8fafc"/>
+
+  <!-- ===================== Title ===================== -->
+  <text x="40" y="48" font-size="26" font-weight="700" fill="#0f172a">AI Ops Platform · 逻辑视图（Logical View）</text>
+  <text x="40" y="74" font-size="14" fill="#64748b">模块分解 · 依赖关系 · 各功能完成度　│　React 18 + TypeScript + Vite 纯前端原型（8 个业务模块，无后端 / 无持久化）</text>
+  <line x1="40" y1="88" x2="1400" y2="88" stroke="#e2e8f0" stroke-width="1"/>
+
+  <!-- Legend -->
+  <g transform="translate(1010,30)">
+    <rect width="390" height="48" rx="8" fill="#ffffff" stroke="#e2e8f0"/>
+    <text x="14" y="20" font-size="11" font-weight="700" fill="#475569">完成度图例</text>
+    <g transform="translate(14,28)">
+      <rect width="12" height="12" rx="3" fill="#10b981"/><text x="18" y="11" font-size="11" fill="#334155">真实逻辑</text>
+      <rect x="86" width="12" height="12" rx="3" fill="#f59e0b"/><text x="104" y="11" font-size="11" fill="#334155">演示级 / 写死</text>
+      <rect x="208" width="12" height="12" rx="3" fill="#ef4444"/><text x="226" y="11" font-size="11" fill="#334155">未实现</text>
+    </g>
+  </g>
+
+  <!-- ===================== Layer 1: Entry ===================== -->
+  <g>
+    <rect x="40" y="106" width="1360" height="108" rx="12" fill="#eef2ff" stroke="#c7d2fe"/>
+    <text x="58" y="128" font-size="12" font-weight="700" fill="#4338ca" letter-spacing="1">① 入口层 ENTRY</text>
+    <!-- index.html -->
+    <rect x="70" y="140" width="200" height="62" rx="8" fill="#ffffff" stroke="#cbd5e1" filter="url(#shadow)"/>
+    <text x="80" y="161" font-size="13" font-weight="700" fill="#1e293b">index.html</text>
+    <text x="80" y="180" font-size="11" fill="#64748b">CDN Tailwind · importmap</text>
+    <text x="80" y="195" font-size="11" fill="#64748b">挂载 #root</text>
+    <!-- arrow -->
+    <line x1="270" y1="171" x2="320" y2="171" stroke="#64748b" stroke-width="1.6" marker-end="url(#arrow)"/>
+    <!-- index.tsx -->
+    <rect x="324" y="140" width="200" height="62" rx="8" fill="#ffffff" stroke="#cbd5e1" filter="url(#shadow)"/>
+    <text x="334" y="161" font-size="13" font-weight="700" fill="#1e293b">index.tsx</text>
+    <text x="334" y="180" font-size="11" fill="#64748b">ReactDOM.createRoot</text>
+    <text x="334" y="195" font-size="11" fill="#64748b">StrictMode · &lt;App/&gt;</text>
+    <line x1="524" y1="171" x2="574" y2="171" stroke="#64748b" stroke-width="1.6" marker-end="url(#arrow)"/>
+    <!-- App.tsx -->
+    <rect x="578" y="140" width="320" height="62" rx="8" fill="#ffffff" stroke="#6366f1" stroke-width="1.6" filter="url(#shadow)"/>
+    <text x="590" y="161" font-size="13" font-weight="700" fill="#4338ca">App.tsx</text>
+    <text x="590" y="180" font-size="11" fill="#64748b">HashRouter · 嵌套路由</text>
+    <text x="590" y="195" font-size="11" fill="#64748b">8 条路由 + “*”→ 重定向 /</text>
+    <!-- note -->
+    <rect x="940" y="148" width="440" height="48" rx="8" fill="#fffbeb" stroke="#fde68a"/>
+    <text x="954" y="170" font-size="11.5" fill="#92400e">⚠ App.tsx 中 <tspan font-family="monospace" fill="#7c2d12">Placeholder</tspan> 为死代码（所有路由已接真实页面）</text>
+    <text x="954" y="187" font-size="11" fill="#b45309">⚠ index.html(importmap React19) 与 package.json(React18) 版本不一致</text>
+  </g>
+
+  <!-- arrow Entry -> Layout -->
+  <line x1="720" y1="214" x2="720" y2="240" stroke="#64748b" stroke-width="1.8" marker-end="url(#arrow)"/>
+
+  <!-- ===================== Layer 2: Layout Shell ===================== -->
+  <g>
+    <rect x="40" y="244" width="1360" height="108" rx="12" fill="#ecfeff" stroke="#a5f3fc"/>
+    <text x="58" y="266" font-size="12" font-weight="700" fill="#0e7490" letter-spacing="1">② 布局骨架 LAYOUT SHELL　(components/)</text>
+    <!-- Sidebar -->
+    <rect x="70" y="278" width="560" height="62" rx="8" fill="#ffffff" stroke="#0f172a" filter="url(#shadow)"/>
+    <rect x="70" y="278" width="6" height="62" rx="3" fill="#0f172a"/>
+    <text x="90" y="299" font-size="13" font-weight="700" fill="#1e293b">Sidebar.tsx　│　左侧导航（fixed w-64，深色）</text>
+    <text x="90" y="318" font-size="11" fill="#64748b">8 个 NavLink 菜单项 · 当前项高亮 · “系统设置”按钮（无功能）</text>
+    <text x="90" y="333" font-size="11" fill="#94a3b8">图标来源：lucide-react</text>
+    <!-- Layout -->
+    <rect x="660" y="278" width="720" height="62" rx="8" fill="#ffffff" stroke="#06b6d4" stroke-width="1.6" filter="url(#shadow)"/>
+    <rect x="660" y="278" width="6" height="62" rx="3" fill="#06b6d4"/>
+    <text x="680" y="299" font-size="13" font-weight="700" fill="#0e7490">Layout.tsx　│　整体骨架（Header + &lt;Outlet/&gt;）</text>
+    <text x="680" y="318" font-size="11" fill="#64748b">顶栏：搜索框（无功能）/ 通知铃铛（无功能）/ 用户信息（静态“管理员·平台工程师”）</text>
+    <text x="680" y="333" font-size="11" fill="#94a3b8">无登录鉴权 · 无跨页面状态（未引入 Redux / Context）</text>
+  </g>
+
+  <!-- arrow Layout -> Modules -->
+  <line x1="720" y1="352" x2="720" y2="378" stroke="#64748b" stroke-width="1.8" marker-end="url(#arrow)"/>
+  <text x="730" y="372" font-size="11" fill="#64748b" font-style="italic">&lt;Outlet/&gt; 按路由渲染当前模块</text>
+
+  <!-- ===================== Layer 3: Feature Modules ===================== -->
+  <g>
+    <rect x="40" y="378" width="1360" height="476" rx="12" fill="#ffffff" stroke="#e2e8f0"/>
+    <text x="58" y="400" font-size="12" font-weight="700" fill="#334155" letter-spacing="1">③ 功能模块层 FEATURE PAGES　(pages/)　— 8 个路由全部接入真实页面组件</text>
+
+    <!-- ===== Row 1 ===== -->
+    <!-- Card 1 Dashboard -->
+    <g transform="translate(60,418)">
+      <rect width="320" height="184" rx="10" fill="#ffffff" stroke="#e2e8f0" filter="url(#shadow)"/>
+      <rect width="320" height="6" rx="3" fill="#3b82f6"/>
+      <text x="16" y="32" font-size="14" font-weight="700" fill="#1e293b">平台总览 Dashboard</text>
+      <text x="304" y="32" font-size="11" fill="#64748b" text-anchor="end" font-family="monospace">/</text>
+      <line x1="16" y1="44" x2="304" y2="44" stroke="#f1f5f9"/>
+      <text x="16" y="66" font-size="11.5" fill="#475569">• 4 张指标卡（活跃任务/数据量/GPU/模型）</text>
+      <text x="16" y="86" font-size="11.5" fill="#475569">• 集群资源面积图（Recharts）</text>
+      <text x="16" y="106" font-size="11.5" fill="#475569">• 任务分布柱状图</text>
+      <rect x="16" y="148" width="120" height="24" rx="12" fill="#fef3c7"/>
+      <circle cx="30" cy="160" r="4" fill="#f59e0b"/>
+      <text x="40" y="164" font-size="11.5" font-weight="600" fill="#92400e">指标数值写死</text>
+    </g>
+
+    <!-- Card 2 DataManager -->
+    <g transform="translate(400,418)">
+      <rect width="320" height="184" rx="10" fill="#ffffff" stroke="#e2e8f0" filter="url(#shadow)"/>
+      <rect width="320" height="6" rx="3" fill="#06b6d4"/>
+      <text x="16" y="32" font-size="14" font-weight="700" fill="#1e293b">数据与样本管理 DataManager</text>
+      <text x="304" y="32" font-size="11" fill="#64748b" text-anchor="end" font-family="monospace">/data</text>
+      <line x1="16" y1="44" x2="304" y2="44" stroke="#f1f5f9"/>
+      <text x="16" y="66" font-size="11.5" fill="#475569">• 3 Tab：数据接入 / 清洗 / 特征</text>
+      <text x="16" y="86" font-size="11.5" fill="#475569">• 接入 Tab：数据集表格（mockDatasets）</text>
+      <text x="16" y="106" font-size="11.5" fill="#475569">• 清洗向导 &amp; 特征卡片 = 占位</text>
+      <text x="16" y="126" font-size="11.5" fill="#94a3b8">数据湖/S3/PG 连接按钮无逻辑</text>
+      <rect x="16" y="148" width="120" height="24" rx="12" fill="#fef3c7"/>
+      <circle cx="30" cy="160" r="4" fill="#f59e0b"/>
+      <text x="40" y="164" font-size="11.5" font-weight="600" fill="#92400e">部分可用</text>
+    </g>
+
+    <!-- Card 3 Annotation (highlight) -->
+    <g transform="translate(740,418)">
+      <rect width="320" height="184" rx="10" fill="#ffffff" stroke="#10b981" stroke-width="2" filter="url(#shadow)"/>
+      <rect width="320" height="6" rx="3" fill="#10b981"/>
+      <text x="16" y="32" font-size="14" font-weight="700" fill="#065f46">数据标注 Annotation ★</text>
+      <text x="304" y="32" font-size="11" fill="#10b981" text-anchor="end" font-family="monospace">/annotation</text>
+      <line x1="16" y1="44" x2="304" y2="44" stroke="#d1fae5"/>
+      <text x="16" y="66" font-size="11.5" fill="#475569">• 任务列表 + <tspan font-weight="700" fill="#065f46">可交互工作台</tspan></text>
+      <text x="16" y="86" font-size="11.5" fill="#475569">• 矩形/多边形/选择/橡皮擦 + 颜色</text>
+      <text x="16" y="106" font-size="11.5" fill="#475569">• SVG 叠加渲染 + 属性面板 + 预设</text>
+      <text x="16" y="126" font-size="11.5" fill="#94a3b8">保存/AI预标注 = 假；局部 useState</text>
+      <rect x="16" y="148" width="150" height="24" rx="12" fill="#d1fae5"/>
+      <circle cx="30" cy="160" r="4" fill="#10b981"/>
+      <text x="40" y="164" font-size="11.5" font-weight="700" fill="#065f46">完成度最高（真交互）</text>
+    </g>
+
+    <!-- Card 4 Training -->
+    <g transform="translate(1080,418)">
+      <rect width="320" height="184" rx="10" fill="#ffffff" stroke="#e2e8f0" filter="url(#shadow)"/>
+      <rect width="320" height="6" rx="3" fill="#6366f1"/>
+      <text x="16" y="32" font-size="14" font-weight="700" fill="#1e293b">模型训练 Training</text>
+      <text x="304" y="32" font-size="11" fill="#64748b" text-anchor="end" font-family="monospace">/training</text>
+      <line x1="16" y1="44" x2="304" y2="44" stroke="#f1f5f9"/>
+      <text x="16" y="66" font-size="11.5" fill="#475569">• 训练任务卡片列表（mockTrainingJobs）</text>
+      <text x="16" y="86" font-size="11.5" fill="#475569">• “新建实验任务”配置面板 UI</text>
+      <text x="16" y="106" font-size="11.5" fill="#475569">• 启动/暂停/终止/提交 = 装饰按钮</text>
+      <text x="16" y="126" font-size="11.5" fill="#94a3b8">无训练调度、无 Loss 实时曲线</text>
+      <rect x="16" y="148" width="120" height="24" rx="12" fill="#fef3c7"/>
+      <circle cx="30" cy="160" r="4" fill="#f59e0b"/>
+      <text x="40" y="164" font-size="11.5" font-weight="600" fill="#92400e">仅展示</text>
+    </g>
+
+    <!-- ===== Row 2 ===== -->
+    <!-- Card 5 Evaluation -->
+    <g transform="translate(60,620)">
+      <rect width="320" height="184" rx="10" fill="#ffffff" stroke="#e2e8f0" filter="url(#shadow)"/>
+      <rect width="320" height="6" rx="3" fill="#8b5cf6"/>
+      <text x="16" y="32" font-size="14" font-weight="700" fill="#1e293b">模型评估 Evaluation</text>
+      <text x="304" y="32" font-size="11" fill="#64748b" text-anchor="end" font-family="monospace">/evaluation</text>
+      <line x1="16" y1="44" x2="304" y2="44" stroke="#f1f5f9"/>
+      <text x="16" y="66" font-size="11.5" fill="#475569">• 综合指标雷达图（Recharts）</text>
+      <text x="16" y="86" font-size="11.5" fill="#475569">• 混淆矩阵热力图（手写）</text>
+      <text x="16" y="106" font-size="11.5" fill="#475569">• 版本对比下拉 = 无切换效果</text>
+      <text x="16" y="126" font-size="11.5" fill="#94a3b8">指标 / 矩阵数据写死</text>
+      <rect x="16" y="148" width="120" height="24" rx="12" fill="#fef3c7"/>
+      <circle cx="30" cy="160" r="4" fill="#f59e0b"/>
+      <text x="40" y="164" font-size="11.5" font-weight="600" fill="#92400e">数据写死</text>
+    </g>
+
+    <!-- Card 6 ModelRegistry -->
+    <g transform="translate(400,620)">
+      <rect width="320" height="184" rx="10" fill="#ffffff" stroke="#e2e8f0" filter="url(#shadow)"/>
+      <rect width="320" height="6" rx="3" fill="#a855f7"/>
+      <text x="16" y="32" font-size="14" font-weight="700" fill="#1e293b">模型注册与版本 ModelRegistry</text>
+      <text x="304" y="32" font-size="11" fill="#64748b" text-anchor="end" font-family="monospace">/models</text>
+      <line x1="16" y1="44" x2="304" y2="44" stroke="#f1f5f9"/>
+      <text x="16" y="66" font-size="11.5" fill="#475569">• 模型版本列表（mockModels）</text>
+      <text x="16" y="86" font-size="11.5" fill="#475569">• 版本号 / F1 / 阶段 / 部署状态</text>
+      <text x="16" y="106" font-size="11.5" fill="#475569">• 纯展示，无部署/下线/归档</text>
+      <rect x="16" y="148" width="120" height="24" rx="12" fill="#fef3c7"/>
+      <circle cx="30" cy="160" r="4" fill="#f59e0b"/>
+      <text x="40" y="164" font-size="11.5" font-weight="600" fill="#92400e">纯展示</text>
+    </g>
+
+    <!-- Card 7 Serving -->
+    <g transform="translate(740,620)">
+      <rect width="320" height="184" rx="10" fill="#ffffff" stroke="#e2e8f0" filter="url(#shadow)"/>
+      <rect width="320" height="6" rx="3" fill="#f59e0b"/>
+      <text x="16" y="32" font-size="14" font-weight="700" fill="#1e293b">推理服务 Serving</text>
+      <text x="304" y="32" font-size="11" fill="#64748b" text-anchor="end" font-family="monospace">/serving</text>
+      <line x1="16" y1="44" x2="304" y2="44" stroke="#f1f5f9"/>
+      <text x="16" y="66" font-size="11.5" fill="#475569">• 2 个推理服务卡片（Endpoint/QPS）</text>
+      <text x="16" y="86" font-size="11.5" fill="#475569">• API 测试控制台（输入/输出 JSON）</text>
+      <text x="16" y="106" font-size="11.5" fill="#475569">• 推理 = setTimeout 800ms 假返回</text>
+      <text x="16" y="126" font-size="11.5" fill="#94a3b8">无真实模型服务</text>
+      <rect x="16" y="148" width="120" height="24" rx="12" fill="#fef3c7"/>
+      <circle cx="30" cy="160" r="4" fill="#f59e0b"/>
+      <text x="40" y="164" font-size="11.5" font-weight="600" fill="#92400e">演示级</text>
+    </g>
+
+    <!-- Card 8 Monitoring -->
+    <g transform="translate(1080,620)">
+      <rect width="320" height="184" rx="10" fill="#ffffff" stroke="#e2e8f0" filter="url(#shadow)"/>
+      <rect width="320" height="6" rx="3" fill="#f43f5e"/>
+      <text x="16" y="32" font-size="14" font-weight="700" fill="#1e293b">监控与日志 Monitoring</text>
+      <text x="304" y="32" font-size="11" fill="#64748b" text-anchor="end" font-family="monospace">/monitoring</text>
+      <line x1="16" y1="44" x2="304" y2="44" stroke="#f1f5f9"/>
+      <text x="16" y="66" font-size="11.5" fill="#475569">• 系统状态横幅（可用性 99.99%）</text>
+      <text x="16" y="86" font-size="11.5" fill="#475569">• QPS / 延迟折线图</text>
+      <text x="16" y="106" font-size="11.5" fill="#475569">• 数据 = Math.random 现场</text>
+      <text x="16" y="126" font-size="11.5" fill="#94a3b8">日志流 = 写死 HTML</text>
+      <rect x="16" y="148" width="120" height="24" rx="12" fill="#fef3c7"/>
+      <circle cx="30" cy="160" r="4" fill="#f59e0b"/>
+      <text x="40" y="164" font-size="11.5" font-weight="600" fill="#92400e">随机数</text>
+    </g>
+  </g>
+
+  <!-- arrow Modules -> Shared (dashed) -->
+  <line x1="720" y1="854" x2="720" y2="880" stroke="#ef4444" stroke-width="1.8" stroke-dasharray="6 4" marker-end="url(#arrowDash)"/>
+  <text x="730" y="872" font-size="11" fill="#ef4444" font-style="italic">静态 import（编译期绑定，无运行时请求）</text>
+
+  <!-- ===================== Layer 4: Shared ===================== -->
+  <g>
+    <rect x="40" y="884" width="1360" height="150" rx="12" fill="#fff7ed" stroke="#fed7aa"/>
+    <text x="58" y="906" font-size="12" font-weight="700" fill="#c2410c" letter-spacing="1">④ 共享层 SHARED　(services/ · types/)　— 全部数据的唯一来源</text>
+
+    <!-- types.ts -->
+    <rect x="70" y="920" width="540" height="100" rx="10" fill="#ffffff" stroke="#fcd34d" filter="url(#shadow)"/>
+    <text x="86" y="944" font-size="14" font-weight="700" fill="#92400e">types.ts　│　领域模型（Domain Types）</text>
+    <text x="86" y="968" font-size="11.5" fill="#475569"><tspan font-family="monospace" fill="#7c2d12">JobStatus</tspan>(枚举) · <tspan font-family="monospace" fill="#7c2d12">Dataset</tspan> · <tspan font-family="monospace" fill="#7c2d12">AnnotationTask</tspan></text>
+    <text x="86" y="988" font-size="11.5" fill="#475569"><tspan font-family="monospace" fill="#7c2d12">TrainingJob</tspan> · <tspan font-family="monospace" fill="#7c2d12">ModelVersion</tspan>　（数据类型：地震/测井/图像/文本）</text>
+    <text x="86" y="1008" font-size="11" fill="#94a3b8">业务领域：惠州凹陷惠西南区块（测井/地震/岩心切片）</text>
+
+    <!-- mockApi.ts -->
+    <rect x="640" y="920" width="560" height="100" rx="10" fill="#ffffff" stroke="#fcd34d" filter="url(#shadow)"/>
+    <text x="656" y="944" font-size="14" font-weight="700" fill="#92400e">services/mockApi.ts　│　Mock 数据层</text>
+    <text x="656" y="968" font-size="11.5" fill="#475569"><tspan font-family="monospace" fill="#7c2d12">mockDatasets</tspan> · <tspan font-family="monospace" fill="#7c2d12">mockAnnotationTasks</tspan></text>
+    <text x="656" y="988" font-size="11.5" fill="#475569"><tspan font-family="monospace" fill="#7c2d12">mockTrainingJobs</tspan> · <tspan font-family="monospace" fill="#7c2d12">mockModels</tspan>　（4 份写死数组）</text>
+    <text x="656" y="1008" font-size="11" fill="#94a3b8">⚠ 无后端 / 无数据库 / 标注结果刷新即丢失</text>
+
+    <!-- void backend -->
+    <rect x="1224" y="920" width="160" height="100" rx="10" fill="#fef2f2" stroke="#fca5a5" stroke-dasharray="5 4"/>
+    <text x="1304" y="952" font-size="34" text-anchor="middle">🚫</text>
+    <text x="1304" y="982" font-size="12" font-weight="700" text-anchor="middle" fill="#b91c1c">后端 / 数据库</text>
+    <text x="1304" y="1000" font-size="11" text-anchor="middle" fill="#dc2626">完全缺失</text>
+  </g>
+
+  <!-- footer -->
+  <text x="40" y="1060" font-size="11" fill="#94a3b8">读图说明：实线箭头 = 渲染 / 组合关系；红色虚线 = 静态数据依赖（前端 ↔ Mock）。除「数据标注 ★ 工作台」外，其余模块的按钮/图表多为装饰性或写死数据。</text>
+  <text x="40" y="1080" font-size="11" fill="#94a3b8">生成依据：App.tsx 路由表 · components/ · pages/(8) · services/mockApi.ts · types.ts · work_list.md</text>
+</svg>
