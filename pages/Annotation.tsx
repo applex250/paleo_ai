@@ -9,6 +9,7 @@ import {
   Trash2,
   ArrowLeft,
   Edit3,
+  Eye,
   RefreshCw,
 } from 'lucide-react';
 import { apiFetch } from '../services/http';
@@ -29,6 +30,7 @@ const Annotation: React.FC = () => {
   const [deleteTarget, setDeleteTarget] = useState<DatasetFile | null>(null);
   const [editing, setEditing] = useState<DatasetFile | null>(null);
   const [exiting, setExiting] = useState(false);
+  const [previewing, setPreviewing] = useState<DatasetFile | null>(null);
 
   const fetchFiles = useCallback(async () => {
     setLoading(true);
@@ -211,6 +213,59 @@ const Annotation: React.FC = () => {
     );
   }
 
+  // ---------- 预览抽屉（只读：无锁、无计时器、无活动检测、不调后端）----------
+  if (previewing) {
+    return (
+      <div className="fixed inset-0 z-50 bg-slate-50 flex flex-col">
+        <div className="h-16 bg-white border-b border-slate-200 px-6 flex items-center">
+          <div className="flex items-center gap-4">
+            <button
+              onClick={() => setPreviewing(null)}
+              className="flex items-center gap-1 text-sm text-slate-600 hover:text-slate-900"
+            >
+              <ArrowLeft size={16} /> 退出预览
+            </button>
+            <div className="h-6 w-px bg-slate-200" />
+            <h2 className="font-medium text-slate-800">预览：{previewing.name}</h2>
+            <span
+              className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[previewing.status] ?? STATUS_STYLE[0]}`}
+            >
+              {previewing.statusLabel ?? STATUS_LABEL[previewing.status] ?? '原始'}
+            </span>
+            <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-slate-200 text-slate-600">
+              只读
+            </span>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-auto p-8">
+          <div className="bg-white rounded-xl border border-slate-200 p-8 max-w-3xl mx-auto">
+            <h3 className="font-medium text-slate-800 mb-4">文件信息</h3>
+            <dl className="grid grid-cols-[100px_1fr] gap-y-2 text-sm">
+              <dt className="text-slate-400">名称</dt>
+              <dd className="text-slate-700">{previewing.name}</dd>
+              <dt className="text-slate-400">格式</dt>
+              <dd className="text-slate-700 uppercase">{previewing.ext || '—'}</dd>
+              <dt className="text-slate-400">大小</dt>
+              <dd className="text-slate-700">{previewing.sizeText}</dd>
+              <dt className="text-slate-400">日期</dt>
+              <dd className="text-slate-700">{previewing.date}</dd>
+              <dt className="text-slate-400">状态</dt>
+              <dd className="text-slate-700">
+                {previewing.statusLabel ?? STATUS_LABEL[previewing.status] ?? '原始'}
+              </dd>
+            </dl>
+            <div className="border-t border-slate-100 mt-6 pt-6 text-center text-slate-400">
+              {/* TODO: xlsx 解析表格组件（编辑/预览共享此插槽） */}
+              <FileText size={40} className="mx-auto mb-2 text-slate-300" />
+              <p className="text-sm">xlsx 表格预览组件待实现（与编辑器共享插槽）</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // ---------- 列表 ----------
   return (
     <div className="space-y-6">
@@ -292,6 +347,13 @@ const Annotation: React.FC = () => {
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-4">
+                        <button
+                          onClick={() => setPreviewing(d)}
+                          className="text-slate-600 hover:text-slate-900 font-medium flex items-center gap-1"
+                          title="只读预览（不加锁）"
+                        >
+                          <Eye size={14} /> 预览
+                        </button>
                         <button
                           onClick={() => handleEdit(d)}
                           className="text-blue-600 hover:text-blue-900 font-medium flex items-center gap-1"

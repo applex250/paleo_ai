@@ -65,9 +65,10 @@ export const annotationRouter = (): Router => {
         .get(id) as { by?: string; exp?: string } | undefined;
       if (!row) return fail(404, '记录不存在');
       const expired = !row.exp || new Date(row.exp).getTime() < Date.now();
-      // 被他人持锁且未过期 → 拒绝
-      if (row.by && row.by !== username && !expired) {
-        return fail(423, '该数据正在被他人编辑');
+      // 有有效锁就拒绝（不区分是否同账号）→ 保证同一时刻只有一个编辑页打开。
+      // 同一账号在另一 PC/标签页已打开编辑时，本端也进不去，需等对方退出/完成或锁过期（巡检）。
+      if (row.by && !expired) {
+        return fail(423, '该数据正在被编辑中（可能是您在另一设备/页面打开了编辑）');
       }
       db.prepare(
         'UPDATE danjing_dataset SET status = 2, locked_by = ?, lock_expire_at = ? WHERE id = ?',
