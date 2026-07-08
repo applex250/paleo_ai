@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
@@ -9,6 +9,9 @@ import ModelRegistry from './pages/ModelRegistry';
 import Evaluation from './pages/Evaluation';
 import Serving from './pages/Serving';
 import Monitoring from './pages/Monitoring';
+import Login from './pages/Login';
+import { apiFetch, setUnauthorizedHandler } from './services/http';
+import type { AuthUser } from './types';
 
 // Placeholder components for routes not yet fully implemented
 const Placeholder: React.FC<{ title: string }> = ({ title }) => (
@@ -22,10 +25,48 @@ const Placeholder: React.FC<{ title: string }> = ({ title }) => (
 );
 
 const App: React.FC = () => {
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    // 全局 401 拦截：清登录态 + 跳登录页（保留来源路径）
+    setUnauthorizedHandler(() => {
+      setUser(null);
+      const cur = window.location.hash.replace(/^#/, '').split('?')[0] || '/';
+      if (cur !== '/login') {
+        window.location.hash = '/login?from=' + encodeURIComponent(cur);
+      }
+    });
+    // 启动探活
+    apiFetch('/api/auth/me')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { user?: AuthUser } | null) => setUser(d?.user ?? null))
+      .catch(() => setUser(null))
+      .finally(() => setReady(true));
+  }, []);
+
+  const handleLogout = async (): Promise<void> => {
+    await apiFetch('/api/auth/logout', { method: 'POST' });
+    setUser(null);
+    window.location.hash = '/login';
+  };
+
+  if (!ready) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-slate-50">
+        <div className="text-slate-400 text-sm">加载中…</div>
+      </div>
+    );
+  }
+
   return (
     <HashRouter>
       <Routes>
-        <Route path="/" element={<Layout />}>
+        <Route path="/login" element={<Login onLogin={setUser} />} />
+        <Route
+          path="/"
+          element={user ? <Layout user={user} onLogout={handleLogout} /> : <Navigate to="/login" replace />}
+        >
           <Route index element={<Dashboard />} />
           <Route path="data" element={<DataManager />} />
           <Route path="annotation" element={<Annotation />} />

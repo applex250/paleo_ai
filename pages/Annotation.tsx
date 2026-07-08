@@ -1,635 +1,370 @@
-
-import React, { useState, useRef, useEffect } from 'react';
-import { 
-  CheckCircle2, 
-  Circle, 
-  MoreVertical, 
-  Brain, 
-  PenTool, 
-  MousePointer2, 
-  Eraser, 
-  ZoomIn,
-  ImagePlus,
-  Square,
-  Move,
+import React, { useCallback, useEffect, useState } from 'react';
+import {
+  Download,
+  FileText,
+  Activity,
+  CheckCircle2,
+  AlertCircle,
+  Loader2,
   Trash2,
+  ArrowLeft,
   Edit3,
-  Palette,
-  ChevronDown,
-  ChevronRight
+  RefreshCw,
 } from 'lucide-react';
-import { mockAnnotationTasks } from '../services/mockApi';
+import { apiFetch } from '../services/http';
+import { lockAnnotation, saveAnnotation, finishAnnotation, exitAnnotation } from '../services/annotation';
+import { useActivityTracker } from '../hooks/useActivityTracker';
+import { useAnnotationLock } from '../hooks/useAnnotationLock';
+import { DatasetFile, STATUS_LABEL, STATUS_STYLE } from '../types';
 
-type ToolType = 'select' | 'box' | 'polygon' | 'eraser';
-
-interface BaseAnnotation {
-  id: number;
-  label: string;
-  type: 'box' | 'polygon';
-  color: string; // Add color property
+interface Msg {
+  type: 'success' | 'error';
+  text: string;
 }
-
-interface BoxAnnotation extends BaseAnnotation {
-  type: 'box';
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
-interface PolygonAnnotation extends BaseAnnotation {
-  type: 'polygon';
-  points: {x: number, y: number}[];
-}
-
-type AnnotationItem = BoxAnnotation | PolygonAnnotation;
-
-// Domain specific presets
-const DOMAIN_PRESETS = {
-  '地震相': ['平行反射', '前积反射', '杂乱反射', '空白反射', '丘状反射', '断层带'],
-  '沉积相': ['三角洲前缘', '水下分流河道', '滨浅湖', '深湖浊积扇', '滑塌沉积', '决口扇'],
-  '岩相': ['细砂岩', '粉砂岩', '泥岩', '生物灰岩', '砾岩', '油页岩']
-};
-
-const COLORS = [
-  '#3b82f6', // Blue
-  '#ef4444', // Red
-  '#10b981', // Emerald
-  '#f59e0b', // Amber
-  '#8b5cf6', // Violet
-  '#ec4899', // Pink
-  '#06b6d4', // Cyan
-];
 
 const Annotation: React.FC = () => {
-  const [view, setView] = useState<'list' | 'workspace'>('list');
-  const [currentImage, setCurrentImage] = useState<string | null>(null);
-  const [tool, setTool] = useState<ToolType>('select');
-  const [annotations, setAnnotations] = useState<AnnotationItem[]>([]);
-  const [activeColor, setActiveColor] = useState<string>(COLORS[0]); // Current drawing color
-  
-  // Drawing states
-  const [isDrawingBox, setIsDrawingBox] = useState(false);
-  const [boxStartPos, setBoxStartPos] = useState({ x: 0, y: 0 });
-  const [currentBox, setCurrentBox] = useState<BoxAnnotation | null>(null);
-  
-  const [currentPolygonPoints, setCurrentPolygonPoints] = useState<{x: number, y: number}[]>([]);
+  const [files, setFiles] = useState<DatasetFile[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [msg, setMsg] = useState<Msg | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<DatasetFile | null>(null);
+  const [editing, setEditing] = useState<DatasetFile | null>(null);
+  const [exiting, setExiting] = useState(false);
 
-  // Selection
-  const [selectedId, setSelectedId] = useState<number | null>(null);
-  const [expandedCategory, setExpandedCategory] = useState<string>('地震相'); // For accordion
-  
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const fetchFiles = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await apiFetch('/api/datasets?key=danjing');
+      const data = await res.json();
+      setFiles(Array.isArray(data.files) ? data.files : []);
+    } catch {
+      setFiles([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    // Reset selection when changing tools
-    setSelectedId(null);
-    setCurrentPolygonPoints([]);
-    setCurrentBox(null);
-  }, [tool]);
+    fetchFiles();
+  }, [fetchFiles]);
 
-  // When selection changes, update active color to match selection
-  useEffect(() => {
-    if (selectedId) {
-      const ann = annotations.find(a => a.id === selectedId);
-      if (ann) setActiveColor(ann.color);
-    }
-  }, [selectedId, annotations]);
-
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      const url = URL.createObjectURL(e.target.files[0]);
-      setCurrentImage(url);
-      setAnnotations([]);
-    }
+  const flash = (m: Msg) => {
+    setMsg(m);
+    window.setTimeout(() => setMsg(null), 3500);
   };
 
-  const getMousePos = (e: React.MouseEvent) => {
-    if (!containerRef.current) return { x: 0, y: 0 };
-    const rect = containerRef.current.getBoundingClientRect();
-    return {
-      x: e.clientX - rect.left,
-      y: e.clientY - rect.top
-    };
-  };
+  // 活动检测 + 锁心跳（editing 为 null 时不启用）
+  const { isActive, isActiveRef, resetActive } = useActivityTracker(!!editing);
+  const lock = useAnnotationLock(editing?.id ?? null, isActiveRef, resetActive);
 
-  // --- Handlers ---
-
-  const handleMouseDown = (e: React.MouseEvent) => {
-    if (!currentImage) return;
-    const pos = getMousePos(e);
-
-    if (tool === 'box') {
-      setIsDrawingBox(true);
-      setBoxStartPos(pos);
-      setCurrentBox({
-        id: Date.now(),
-        type: 'box',
-        x: pos.x,
-        y: pos.y,
-        width: 0,
-        height: 0,
-        label: '标注区域',
-        color: activeColor
-      });
+  // 进入编辑：加锁
+  const handleEdit = async (d: DatasetFile) => {
+    if (d.id == null) return;
+    const res = await lockAnnotation(d.id);
+    if (!res.ok) {
+      flash({ type: 'error', text: res.error || '无法进入编辑' });
+      return;
     }
+    setEditing(d);
   };
 
-  const handleMouseMove = (e: React.MouseEvent) => {
-    const pos = getMousePos(e);
-
-    if (tool === 'box' && isDrawingBox && currentBox) {
-      setCurrentBox({
-        ...currentBox,
-        width: pos.x - boxStartPos.x,
-        height: pos.y - boxStartPos.y
-      });
+  // 退出编辑：保存 + 释放锁(status:2→1) + 关闭页面 + 刷新列表
+  // setEditing(null) 会触发 hooks 清理（停 5min 计时器、移除 keydown/scroll/mousemove 监听）
+  const handleExit = async () => {
+    if (editing?.id == null) return;
+    setExiting(true);
+    const res = await exitAnnotation(editing.id); // 占位期无 content
+    setExiting(false);
+    if (!res.ok) {
+      flash({ type: 'error', text: '退出时保存失败：' + (res.error || '未知错误') + '，页面仍将关闭' });
     }
+    setEditing(null); // 关闭编辑页面 → hooks 自动清理计时器与事件监听
+    fetchFiles(); // 刷新标注列表（显示最新状态）
   };
 
-  const handleMouseUp = () => {
-    if (tool === 'box' && isDrawingBox && currentBox) {
-      setIsDrawingBox(false);
-      // Normalize box
-      const normalizedBox: BoxAnnotation = {
-        ...currentBox,
-        x: currentBox.width < 0 ? currentBox.x + currentBox.width : currentBox.x,
-        y: currentBox.height < 0 ? currentBox.y + currentBox.height : currentBox.y,
-        width: Math.abs(currentBox.width),
-        height: Math.abs(currentBox.height),
-      };
-      
-      if (normalizedBox.width > 5 && normalizedBox.height > 5) {
-        setAnnotations([...annotations, normalizedBox]);
-        setSelectedId(normalizedBox.id);
-      }
-      setCurrentBox(null);
+  // 保存：占位期不传 content（编辑器就绪后再传）
+  const handleSave = async () => {
+    if (editing?.id == null) return;
+    const res = await saveAnnotation(editing.id);
+    if (!res.ok) {
+      flash({ type: 'error', text: res.error || '保存失败' });
+      return;
+    }
+    flash({ type: 'success', text: '已保存（占位期未写入文件内容）' });
+  };
+
+  // 完成：status→3，释放锁
+  const handleFinish = async () => {
+    if (editing?.id == null) return;
+    const res = await finishAnnotation(editing.id);
+    if (!res.ok) {
+      flash({ type: 'error', text: res.error || '完成失败' });
+      return;
+    }
+    setEditing(null);
+    flash({ type: 'success', text: '已完成' });
+    fetchFiles();
+  };
+
+  // 导出
+  const handleExportRow = async (d: DatasetFile) => {
+    if (d.id == null) return;
+    try {
+      const res = await apiFetch(`/api/datasets/danjing/file?id=${d.id}`);
+      if (!res.ok) throw new Error();
+      const blob = await res.blob();
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `${d.name}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(a.href);
+    } catch {
+      flash({ type: 'error', text: '导出失败' });
     }
   };
 
-  const handleCanvasClick = (e: React.MouseEvent) => {
-    if (!currentImage) return;
-    const pos = getMousePos(e);
-
-    if (tool === 'polygon') {
-      setCurrentPolygonPoints([...currentPolygonPoints, pos]);
-    } else if (tool === 'select') {
-      setSelectedId(null); 
+  // 删除
+  const handleDelete = async () => {
+    const d = deleteTarget;
+    if (!d || d.id == null) return;
+    try {
+      const res = await apiFetch(`/api/datasets/danjing?id=${d.id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error();
+      setDeleteTarget(null);
+      fetchFiles();
+      flash({ type: 'success', text: `已删除「${d.name}」` });
+    } catch {
+      flash({ type: 'error', text: '删除失败' });
+      setDeleteTarget(null);
     }
   };
 
-  const handlePolygonDoubleClick = () => {
-    if (tool === 'polygon' && currentPolygonPoints.length > 2) {
-      const newPoly: PolygonAnnotation = {
-        id: Date.now(),
-        type: 'polygon',
-        label: '多边形区域',
-        points: [...currentPolygonPoints],
-        color: activeColor
-      };
-      setAnnotations([...annotations, newPoly]);
-      setSelectedId(newPoly.id);
-      setCurrentPolygonPoints([]);
-    }
-  };
-
-  const handleAnnotationClick = (e: React.MouseEvent, id: number) => {
-    e.stopPropagation();
-    if (tool === 'eraser') {
-      deleteAnnotation(id);
-    } else if (tool === 'select') {
-      setSelectedId(id);
-    }
-  };
-
-  const deleteAnnotation = (id: number) => {
-    setAnnotations(annotations.filter(a => a.id !== id));
-    if (selectedId === id) setSelectedId(null);
-  };
-
-  const updateLabel = (id: number, newLabel: string) => {
-    setAnnotations(annotations.map(a => a.id === id ? { ...a, label: newLabel } : a));
-  };
-
-  const updateColor = (id: number, newColor: string) => {
-    setAnnotations(annotations.map(a => a.id === id ? { ...a, color: newColor } : a));
-    setActiveColor(newColor);
-  };
-
-  // --- Render Helpers ---
-
-  const renderPolygonPoints = (points: {x: number, y: number}[]) => {
-    return points.map(p => `${p.x},${p.y}`).join(' ');
-  };
-
-  const selectedAnnotation = annotations.find(a => a.id === selectedId);
-
-  // Helper to convert hex to rgba
-  const hexToRgba = (hex: string, alpha: number) => {
-    const r = parseInt(hex.slice(1, 3), 16);
-    const g = parseInt(hex.slice(3, 5), 16);
-    const b = parseInt(hex.slice(5, 7), 16);
-    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
-  };
-
-  if (view === 'workspace') {
+  // ---------- 编辑抽屉 ----------
+  if (editing) {
     return (
-      <div className="h-[calc(100vh-8rem)] flex flex-col bg-slate-900 rounded-xl overflow-hidden text-slate-300">
-        <div className="bg-slate-800 p-4 flex justify-between items-center border-b border-slate-700">
+      <div className="fixed inset-0 z-50 bg-slate-50 flex flex-col">
+        <div className="h-16 bg-white border-b border-slate-200 px-6 flex items-center justify-between">
           <div className="flex items-center gap-4">
-             <button onClick={() => setView('list')} className="text-sm hover:text-white flex items-center gap-1">← 返回任务列表</button>
-             <h2 className="text-white font-medium pl-4 border-l border-slate-600">任务: 惠州凹陷惠西南-单井测井曲线 #1024</h2>
+            <button
+              onClick={handleExit}
+              disabled={exiting}
+              className="flex items-center gap-1 text-sm text-slate-600 hover:text-slate-900 disabled:opacity-50"
+            >
+              <ArrowLeft size={16} /> 退出编辑
+            </button>
+            <div className="h-6 w-px bg-slate-200" />
+            <h2 className="font-medium text-slate-800">编辑：{editing.name}</h2>
+            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[2]}`}>
+              {STATUS_LABEL[2]}
+            </span>
           </div>
-          <div className="flex items-center gap-3">
-             <input 
-                type="file" 
-                ref={fileInputRef} 
-                onChange={handleImageUpload} 
-                className="hidden" 
-                accept="image/*"
-             />
-             <button 
-                onClick={() => fileInputRef.current?.click()}
-                className="text-xs px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white rounded border border-slate-600 flex items-center gap-2"
-             >
-                <ImagePlus size={14} /> 上传切片/图件
-             </button>
-             <span className="text-xs px-2 py-1 bg-purple-900 text-purple-200 rounded border border-purple-700 flex items-center gap-1">
-               <Brain size={12} /> 智能辅助开启
-             </span>
-             <button className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded text-sm font-medium">提交保存</button>
-          </div>
+          {lock.message && (
+            <div
+              className={`text-xs px-3 py-1 rounded ${
+                lock.readOnly ? 'bg-red-50 text-red-600' : 'bg-amber-50 text-amber-700'
+              }`}
+            >
+              {lock.message}
+            </div>
+          )}
         </div>
-        
-        <div className="flex-1 flex overflow-hidden">
-           {/* Toolbar */}
-           <div className="w-14 bg-slate-800 border-r border-slate-700 flex flex-col items-center py-4 gap-4 z-10">
-              <button 
-                onClick={() => setTool('select')}
-                className={`p-2 rounded transition-colors ${tool === 'select' ? 'bg-blue-600 text-white' : 'hover:bg-slate-700 text-slate-400'}`}
-                title="选择 (V)"
-              >
-                <Move size={20} />
-              </button>
-              <button 
-                onClick={() => setTool('box')}
-                className={`p-2 rounded transition-colors ${tool === 'box' ? 'bg-blue-600 text-white' : 'hover:bg-slate-700 text-slate-400'}`}
-                title="矩形标注 (R)"
-              >
-                <Square size={20} />
-              </button>
-              <button 
-                onClick={() => setTool('polygon')}
-                className={`p-2 rounded transition-colors ${tool === 'polygon' ? 'bg-blue-600 text-white' : 'hover:bg-slate-700 text-slate-400'}`}
-                title="钢笔/多边形 (P) - 双击结束"
-              >
-                <PenTool size={20} />
-              </button>
-              <button 
-                onClick={() => setTool('eraser')}
-                className={`p-2 rounded transition-colors ${tool === 'eraser' ? 'bg-red-600 text-white' : 'hover:bg-slate-700 text-slate-400'}`}
-                title="橡皮擦 (E) - 点击删除"
-              >
-                <Eraser size={20} />
-              </button>
-              
-              <div className="w-8 h-px bg-slate-700 my-2"></div>
-              
-              {/* Color Picker in Toolbar */}
-              <div className="flex flex-col gap-2 items-center">
-                 <Palette size={16} className="text-slate-500" />
-                 {COLORS.map(c => (
-                   <button
-                     key={c}
-                     onClick={() => {
-                        setActiveColor(c);
-                        if (selectedAnnotation) updateColor(selectedAnnotation.id, c);
-                     }}
-                     className={`w-4 h-4 rounded-full transition-all ${activeColor === c ? 'scale-125 ring-2 ring-white' : 'hover:scale-110'}`}
-                     style={{ backgroundColor: c }}
-                   />
-                 ))}
-              </div>
 
-              <div className="flex-1"></div>
-              <button className="p-2 hover:bg-slate-700 text-slate-400 rounded"><ZoomIn size={20} /></button>
-           </div>
-           
-           {/* Canvas Area */}
-           <div className="flex-1 bg-black relative flex items-center justify-center overflow-auto bg-grid-slate-800">
-              <div 
-                ref={containerRef}
-                className={`relative shadow-2xl ${tool === 'eraser' ? 'cursor-not-allowed' : tool === 'select' ? 'cursor-default' : 'cursor-crosshair'}`}
-                onMouseDown={handleMouseDown}
-                onMouseMove={handleMouseMove}
-                onMouseUp={handleMouseUp}
-                onMouseLeave={handleMouseUp}
-                onClick={handleCanvasClick}
-                onDoubleClick={handlePolygonDoubleClick}
-              >
-                {currentImage ? (
-                  <img src={currentImage} alt="Work" className="max-h-[80vh] max-w-full select-none" draggable={false} />
-                ) : (
-                  <div className="w-[800px] h-[600px] bg-slate-800 flex flex-col items-center justify-center border-2 border-dashed border-slate-600 rounded-lg">
-                    <ImagePlus size={64} className="text-slate-600 mb-4" />
-                    <p className="text-slate-400">请上传地震剖面图或测井曲线图</p>
-                    <button 
-                        onClick={() => fileInputRef.current?.click()}
-                        className="mt-4 px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded text-sm font-medium"
-                    >
-                        选择本地文件
-                    </button>
-                  </div>
-                )}
+        <div className="flex-1 overflow-auto p-8">
+          {lock.readOnly ? (
+            <div className="flex items-center justify-center h-full text-slate-400">
+              <AlertCircle size={20} className="mr-2" />
+              文档已被他人抢占编辑权限，当前内容只读
+            </div>
+          ) : (
+            <div className="bg-white rounded-xl border-2 border-dashed border-slate-200 p-12 text-center text-slate-400">
+              {/* TODO: xlsx 解析表格组件（下一期填入） */}
+              <FileText size={48} className="mx-auto mb-3 text-slate-300" />
+              <p className="font-medium text-slate-500">编辑器主体（占位）</p>
+              <p className="text-sm mt-1">
+                此处后续填入 xlsx 解析表格组件。当前编辑锁与自动续期引擎已生效。
+              </p>
+              <p className="text-xs mt-3">
+                活动检测：{isActive ? '活跃' : '空闲'} · 锁：{lock.locked ? '持有中' : '—'}
+              </p>
+            </div>
+          )}
+        </div>
 
-                {/* SVG Overlay for Annotations */}
-                {(currentImage || annotations.length > 0) && (
-                   <svg className="absolute inset-0 w-full h-full">
-                      {/* Existing Annotations */}
-                      {annotations.map((ann) => {
-                        const isSelected = selectedId === ann.id;
-                        const fillColor = hexToRgba(ann.color, isSelected ? 0.35 : 0.15);
-                        const strokeColor = ann.color;
-                        const strokeWidth = isSelected ? 3 : 2;
-
-                        return (
-                          <g key={ann.id} onClick={(e) => handleAnnotationClick(e, ann.id)}>
-                            {ann.type === 'box' ? (
-                                <rect 
-                                  x={ann.x} y={ann.y} width={ann.width} height={ann.height}
-                                  fill={fillColor}
-                                  stroke={strokeColor}
-                                  strokeWidth={strokeWidth}
-                                  className="hover:opacity-80 transition-opacity"
-                                />
-                            ) : (
-                                <polygon
-                                  points={renderPolygonPoints(ann.points)}
-                                  fill={fillColor}
-                                  stroke={strokeColor}
-                                  strokeWidth={strokeWidth}
-                                  className="hover:opacity-80 transition-opacity"
-                                />
-                            )}
-                            {/* Text Label */}
-                            <text 
-                                x={ann.type === 'box' ? ann.x : ann.points[0].x} 
-                                y={(ann.type === 'box' ? ann.y : ann.points[0].y) - 5} 
-                                fill={ann.color}
-                                fontSize="14" 
-                                fontWeight="bold"
-                                style={{textShadow: '0 1px 2px rgba(0,0,0,0.8)'}}
-                                className="select-none pointer-events-none"
-                            >
-                                {ann.label}
-                            </text>
-                          </g>
-                        );
-                      })}
-
-                      {/* Drawing Box Preview */}
-                      {currentBox && (
-                         <rect 
-                           x={currentBox.width < 0 ? currentBox.x + currentBox.width : currentBox.x} 
-                           y={currentBox.height < 0 ? currentBox.y + currentBox.height : currentBox.y}
-                           width={Math.abs(currentBox.width)} 
-                           height={Math.abs(currentBox.height)}
-                           fill={hexToRgba(activeColor, 0.1)}
-                           stroke={activeColor}
-                           strokeWidth="2"
-                           strokeDasharray="4"
-                           pointerEvents="none"
-                         />
-                      )}
-
-                      {/* Drawing Polygon Preview */}
-                      {currentPolygonPoints.length > 0 && (
-                          <g pointerEvents="none">
-                              <polyline
-                                points={renderPolygonPoints(currentPolygonPoints)}
-                                fill="none"
-                                stroke={activeColor}
-                                strokeWidth="2"
-                                strokeDasharray="4"
-                              />
-                              {currentPolygonPoints.map((p, i) => (
-                                  <circle key={i} cx={p.x} cy={p.y} r={3} fill="#fff" stroke={activeColor} />
-                              ))}
-                          </g>
-                      )}
-                   </svg>
-                )}
-              </div>
-           </div>
-
-           {/* Right Panel */}
-           <div className="w-72 bg-slate-800 border-l border-slate-700 flex flex-col">
-              <div className="p-4 border-b border-slate-700">
-                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">属性面板</h3>
-              </div>
-              
-              <div className="flex-1 overflow-y-auto p-4 space-y-6">
-                 {/* Selection Editor */}
-                 {selectedAnnotation ? (
-                     <div className="bg-slate-700/50 p-4 rounded-lg border border-slate-600 animate-fade-in">
-                        <h4 className="text-sm font-medium text-white mb-3 flex items-center gap-2">
-                           <Edit3 size={14} /> 编辑属性
-                        </h4>
-                        <div className="space-y-3">
-                            <div>
-                                <label className="text-xs text-slate-400 block mb-1">标签名称</label>
-                                <input 
-                                    type="text" 
-                                    value={selectedAnnotation.label}
-                                    onChange={(e) => updateLabel(selectedAnnotation.id, e.target.value)}
-                                    className="w-full bg-slate-900 border border-slate-600 text-slate-200 text-sm rounded px-2 py-1.5 focus:border-blue-500 outline-none"
-                                />
-                            </div>
-
-                            {/* Accordion for Presets */}
-                            <div>
-                                <label className="text-xs text-slate-400 block mb-2">行业预设标签</label>
-                                <div className="space-y-1">
-                                    {Object.entries(DOMAIN_PRESETS).map(([category, tags]) => (
-                                        <div key={category} className="border border-slate-600 rounded overflow-hidden">
-                                            <button 
-                                                onClick={() => setExpandedCategory(expandedCategory === category ? '' : category)}
-                                                className="w-full flex items-center justify-between px-3 py-2 bg-slate-700/50 hover:bg-slate-600 text-xs font-medium text-slate-300"
-                                            >
-                                                {category}
-                                                {expandedCategory === category ? <ChevronDown size={12}/> : <ChevronRight size={12}/>}
-                                            </button>
-                                            
-                                            {expandedCategory === category && (
-                                                <div className="p-2 bg-slate-800 grid grid-cols-2 gap-2">
-                                                    {tags.map(tag => (
-                                                        <button 
-                                                            key={tag}
-                                                            onClick={() => updateLabel(selectedAnnotation.id, tag)}
-                                                            className={`px-2 py-1 text-xs truncate rounded transition-colors text-left ${selectedAnnotation.label === tag ? 'bg-blue-900 text-blue-200 border border-blue-700' : 'bg-slate-700 text-slate-400 hover:bg-slate-600'}`}
-                                                            title={tag}
-                                                        >
-                                                            {tag}
-                                                        </button>
-                                                    ))}
-                                                </div>
-                                            )}
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-
-                            <div className="pt-2 border-t border-slate-600">
-                                <label className="text-xs text-slate-400 block mb-2">标注颜色</label>
-                                <div className="flex gap-2">
-                                    {COLORS.map(c => (
-                                        <button 
-                                            key={c}
-                                            onClick={() => updateColor(selectedAnnotation.id, c)}
-                                            className={`w-6 h-6 rounded-full border-2 ${selectedAnnotation.color === c ? 'border-white' : 'border-transparent'}`}
-                                            style={{backgroundColor: c}}
-                                        />
-                                    ))}
-                                </div>
-                            </div>
-
-                            <div className="pt-2 border-t border-slate-600">
-                                <button 
-                                    onClick={() => deleteAnnotation(selectedAnnotation.id)}
-                                    className="w-full text-xs text-red-400 hover:text-red-300 py-1 flex items-center justify-center gap-1"
-                                >
-                                    <Trash2 size={12} /> 删除此标注
-                                </button>
-                            </div>
-                        </div>
-                     </div>
-                 ) : (
-                     <div className="text-center py-8 text-slate-500 text-sm border-2 border-dashed border-slate-700 rounded-lg">
-                        请在画布中选择一个标注以编辑属性，<br/>或在左侧选择工具开始绘制。
-                     </div>
-                 )}
-
-                 {/* List */}
-                 <div>
-                     <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3">标注列表 ({annotations.length})</h4>
-                     <div className="space-y-2 max-h-60 overflow-y-auto pr-1 custom-scrollbar">
-                        {annotations.map((ann, idx) => (
-                            <div 
-                                key={ann.id} 
-                                onClick={() => { setSelectedId(ann.id); setTool('select'); }}
-                                className={`flex items-center justify-between p-2 rounded text-sm cursor-pointer transition-colors border-l-4 ${selectedId === ann.id ? 'bg-slate-700' : 'bg-slate-800 hover:bg-slate-700'}`}
-                                style={{ borderLeftColor: ann.color }}
-                            >
-                                <div className="flex items-center gap-2">
-                                    <span className="text-slate-200 truncate max-w-[120px]">{ann.label}</span>
-                                </div>
-                                <span className="text-xs text-slate-500 font-mono">#{idx + 1}</span>
-                            </div>
-                        ))}
-                     </div>
-                 </div>
-              </div>
-
-              <div className="p-4 bg-slate-700/30 border-t border-slate-700">
-                 <h4 className="text-sm font-medium text-emerald-400 mb-2 flex items-center gap-2">
-                    <Brain size={14} /> 智能辅助建议
-                 </h4>
-                 <p className="text-xs text-slate-400 mb-2">
-                    系统在右侧区域识别出【三角洲前缘】沉积特征 (置信度 89%)。
-                 </p>
-                 <button className="w-full text-xs py-1.5 bg-emerald-900/30 hover:bg-emerald-900/50 text-emerald-200 border border-emerald-800 rounded transition-colors">
-                    一键应用预标注
-                 </button>
-              </div>
-           </div>
+        <div className="h-16 bg-white border-t border-slate-200 px-6 flex items-center justify-end gap-3">
+          <button
+            onClick={handleSave}
+            disabled={lock.readOnly}
+            className="px-5 py-2 rounded-lg text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 disabled:opacity-50"
+          >
+            保存
+          </button>
+          <button
+            onClick={handleFinish}
+            disabled={lock.readOnly}
+            className="px-5 py-2 rounded-lg text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1.5"
+          >
+            <CheckCircle2 size={14} /> 完成
+          </button>
         </div>
       </div>
     );
   }
 
+  // ---------- 列表 ----------
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-2xl font-bold text-slate-800">数据标注平台</h1>
-          <p className="text-slate-500 mt-1">惠州凹陷惠西南区块 - 测井/地震/切片综合标注任务管理。</p>
+          <h1 className="text-2xl font-bold text-slate-800">数据标注</h1>
+          <p className="text-slate-500 mt-1">
+            对单井数据进行编辑标注，支持四级状态流转与并发编辑锁。
+          </p>
         </div>
-        <button className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors shadow-sm" onClick={() => setView('workspace')}>
-          进入标注工作台
+        <button
+          onClick={fetchFiles}
+          className="text-sm text-blue-600 hover:text-blue-800 flex items-center gap-1"
+        >
+          <RefreshCw size={14} /> 刷新
         </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-        <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl p-6 text-white shadow-lg shadow-blue-200">
-          <h3 className="font-semibold text-blue-100">待处理任务</h3>
-          <p className="text-3xl font-bold mt-2">128</p>
-          <p className="text-xs text-blue-200 mt-1">主要集中在：地震曲线标注</p>
+      <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+        <div className="p-4 border-b border-slate-100">
+          <h3 className="font-bold text-slate-800 text-lg flex items-center gap-2">
+            <Activity size={18} className="text-blue-600" /> 单井数据 · 标注列表
+          </h3>
+          <p className="text-xs text-slate-500 mt-1">共 {files.length} 个数据集</p>
         </div>
-        <div className="bg-white rounded-xl p-6 border border-slate-100 shadow-sm">
-           <h3 className="font-semibold text-slate-500">标注准确率</h3>
-           <p className="text-3xl font-bold mt-2 text-slate-800">98.5%</p>
-        </div>
-        <div className="bg-white rounded-xl p-6 border border-slate-100 shadow-sm">
-           <h3 className="font-semibold text-slate-500">团队效率</h3>
-           <p className="text-3xl font-bold mt-2 text-slate-800">4.2k <span className="text-sm text-slate-400 font-normal">样本/天</span></p>
-        </div>
+
+        {msg && (
+          <div
+            className={`px-4 py-2.5 text-sm flex items-center gap-2 border-b ${
+              msg.type === 'success'
+                ? 'bg-green-50 text-green-700 border-green-100'
+                : 'bg-red-50 text-red-700 border-red-100'
+            }`}
+          >
+            {msg.type === 'success' ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
+            {msg.text}
+          </div>
+        )}
+
+        {loading ? (
+          <div className="p-12 text-center text-slate-400 flex items-center justify-center gap-2">
+            <Loader2 size={18} className="animate-spin" /> 加载列表…
+          </div>
+        ) : files.length > 0 ? (
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-left text-sm">
+              <thead className="bg-slate-50 text-slate-500 font-medium">
+                <tr>
+                  <th className="px-6 py-3">数据集名称</th>
+                  <th className="px-6 py-3">格式</th>
+                  <th className="px-6 py-3">大小</th>
+                  <th className="px-6 py-3">创建日期</th>
+                  <th className="px-6 py-3">状态</th>
+                  <th className="px-6 py-3">操作</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {files.map((d) => (
+                  <tr key={d.id ?? d.filename} className="hover:bg-slate-50 transition-colors">
+                    <td className="px-6 py-4 font-medium text-slate-900 flex items-center gap-2">
+                      <FileText size={16} className="text-slate-400" />
+                      {d.name}
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-mono bg-slate-100 text-slate-600 uppercase">
+                        {d.ext || '—'}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-slate-500">{d.sizeText}</td>
+                    <td className="px-6 py-4 text-slate-500">{d.date}</td>
+                    <td className="px-6 py-4">
+                      <span
+                        className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                          STATUS_STYLE[d.status] ?? STATUS_STYLE[0]
+                        }`}
+                      >
+                        {d.statusLabel ?? STATUS_LABEL[d.status] ?? '原始'}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-4">
+                        <button
+                          onClick={() => handleEdit(d)}
+                          className="text-blue-600 hover:text-blue-900 font-medium flex items-center gap-1"
+                          title="进入编辑（加锁）"
+                        >
+                          <Edit3 size={14} /> 数据编辑
+                        </button>
+                        <button
+                          onClick={() => handleExportRow(d)}
+                          className="text-slate-600 hover:text-slate-900 font-medium flex items-center gap-1"
+                        >
+                          <Download size={14} /> 导出
+                        </button>
+                        <button
+                          onClick={() => setDeleteTarget(d)}
+                          className="text-red-600 hover:text-red-700 font-medium flex items-center gap-1"
+                        >
+                          <Trash2 size={14} /> 删除
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="p-12 text-center text-slate-400">
+            <FileText size={40} className="mx-auto mb-3 text-slate-300" />
+            <p>暂无可标注的单井数据</p>
+            <p className="text-xs mt-1">请先在「数据与样本管理」导入单井数据</p>
+          </div>
+        )}
       </div>
 
-      <div className="bg-white rounded-xl shadow-sm border border-slate-100">
-        <div className="p-4 border-b border-slate-200">
-           <h3 className="font-bold text-slate-700">任务队列</h3>
+      {/* 删除确认 */}
+      {deleteTarget && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+          onClick={() => setDeleteTarget(null)}
+        >
+          <div
+            className="bg-white rounded-xl shadow-2xl p-6 w-[440px] max-w-[90vw]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start gap-3">
+              <div className="p-2 bg-red-50 rounded-lg text-red-600">
+                <AlertCircle size={22} />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-slate-800">确认删除？</h3>
+                <p className="text-sm text-slate-500 mt-1.5">
+                  将删除「{deleteTarget.name}」的记录与文件，<span className="text-red-600">不可恢复</span>。
+                </p>
+              </div>
+            </div>
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                onClick={() => setDeleteTarget(null)}
+                className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleDelete}
+                className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-red-600 hover:bg-red-700 flex items-center gap-1.5"
+              >
+                <Trash2 size={14} /> 确认删除
+              </button>
+            </div>
+          </div>
         </div>
-        <table className="min-w-full text-left text-sm">
-          <thead className="bg-slate-50 text-slate-500 font-medium">
-            <tr>
-              <th className="px-6 py-3">任务ID</th>
-              <th className="px-6 py-3">所属数据集</th>
-              <th className="px-6 py-3">标注类型</th>
-              <th className="px-6 py-3">负责人</th>
-              <th className="px-6 py-3">进度</th>
-              <th className="px-6 py-3">状态</th>
-              <th className="px-6 py-3"></th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {mockAnnotationTasks.map((task) => (
-              <tr key={task.id} className="hover:bg-slate-50 transition-colors cursor-pointer" onClick={() => setView('workspace')}>
-                <td className="px-6 py-4 font-mono text-slate-500">#{task.id}</td>
-                <td className="px-6 py-4 font-medium text-slate-900">{task.datasetName}</td>
-                <td className="px-6 py-4">
-                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-700">
-                        {task.type}
-                    </span>
-                </td>
-                <td className="px-6 py-4">
-                  <div className="flex items-center gap-2">
-                    <div className="w-6 h-6 rounded-full bg-slate-200 flex items-center justify-center text-xs font-bold text-slate-600">
-                      {task.annotator.charAt(0)}
-                    </div>
-                    {task.annotator}
-                  </div>
-                </td>
-                <td className="px-6 py-4">
-                  <div className="w-24 bg-slate-200 rounded-full h-2">
-                    <div className="bg-blue-500 h-2 rounded-full" style={{ width: `${task.progress}%` }}></div>
-                  </div>
-                </td>
-                <td className="px-6 py-4">
-                  <span className={`px-2 py-1 rounded text-xs font-medium ${
-                    task.status === '待审核' ? 'bg-orange-100 text-orange-800' : 'bg-blue-100 text-blue-800'
-                  }`}>
-                    {task.status}
-                  </span>
-                </td>
-                <td className="px-6 py-4 text-slate-400">
-                   <MoreVertical size={16} />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      )}
     </div>
   );
 };

@@ -2,9 +2,15 @@
 import { Dataset, AnnotationTask, TrainingJob, JobStatus, ModelVersion } from '../types';
 
 export const mockDatasets: Dataset[] = [
-  { id: '1', name: '惠州凹陷惠西南-地震数据A组', type: '地震数据', size: '4.5 TB', sampleCount: 12000, uploadedBy: '张三 (专家)', date: '2023-10-01', status: '已清洗' },
-  { id: '2', name: '惠州凹陷惠西南-单井测井曲线', type: '测井数据', size: '500 MB', sampleCount: 450, uploadedBy: '李四', date: '2023-10-05', status: '原始' },
-  { id: '3', name: '惠州凹陷惠西南-岩心切片库', type: '图像数据', size: '1.2 TB', sampleCount: 50000, uploadedBy: 'AI组', date: '2023-10-12', status: '特征已提取' },
+  // 单井数据
+  { id: '1', name: '惠州凹陷惠西南-单井测井曲线', type: '单井数据', size: '500 MB', sampleCount: 450, uploadedBy: '李四', date: '2023-10-05', status: '原始' },
+  { id: '2', name: 'HZ-26-1 单井综合解释数据', type: '单井数据', size: '320 MB', sampleCount: 280, uploadedBy: '王五', date: '2023-11-02', status: '已清洗' },
+  // 地震数据
+  { id: '3', name: '惠州凹陷惠西南-地震数据A组', type: '地震数据', size: '4.5 TB', sampleCount: 12000, uploadedBy: '张三 (专家)', date: '2023-10-01', status: '已清洗' },
+  { id: '4', name: '惠州凹陷惠西南-三维叠前时间偏移体', type: '地震数据', size: '8.2 TB', sampleCount: 24000, uploadedBy: '处理组', date: '2023-12-15', status: '原始' },
+  // 切片数据
+  { id: '5', name: '惠州凹陷惠西南-岩心切片库', type: '切片数据', size: '1.2 TB', sampleCount: 50000, uploadedBy: 'AI组', date: '2023-10-12', status: '原始' },
+  { id: '6', name: '岩心薄片显微图像集', type: '切片数据', size: '680 GB', sampleCount: 18500, uploadedBy: '岩心实验室', date: '2024-01-08', status: '已清洗' },
 ];
 
 export const mockAnnotationTasks: AnnotationTask[] = [
