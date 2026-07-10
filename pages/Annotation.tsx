@@ -17,6 +17,7 @@ import { lockAnnotation, saveAnnotation, finishAnnotation, exitAnnotation } from
 import { useActivityTracker } from '../hooks/useActivityTracker';
 import { useAnnotationLock } from '../hooks/useAnnotationLock';
 import { DatasetFile, STATUS_LABEL, STATUS_STYLE } from '../types';
+import WellLogViewer from '../welllog/components/WellLogViewer';
 
 interface Msg {
   type: 'success' | 'error';
@@ -238,30 +239,13 @@ const Annotation: React.FC = () => {
           </div>
         </div>
 
-        <div className="flex-1 overflow-auto p-8">
-          <div className="bg-white rounded-xl border border-slate-200 p-8 max-w-3xl mx-auto">
-            <h3 className="font-medium text-slate-800 mb-4">文件信息</h3>
-            <dl className="grid grid-cols-[100px_1fr] gap-y-2 text-sm">
-              <dt className="text-slate-400">名称</dt>
-              <dd className="text-slate-700">{previewing.name}</dd>
-              <dt className="text-slate-400">格式</dt>
-              <dd className="text-slate-700 uppercase">{previewing.ext || '—'}</dd>
-              <dt className="text-slate-400">大小</dt>
-              <dd className="text-slate-700">{previewing.sizeText}</dd>
-              <dt className="text-slate-400">日期</dt>
-              <dd className="text-slate-700">{previewing.date}</dd>
-              <dt className="text-slate-400">状态</dt>
-              <dd className="text-slate-700">
-                {previewing.statusLabel ?? STATUS_LABEL[previewing.status] ?? '原始'}
-              </dd>
-            </dl>
-            <div className="border-t border-slate-100 mt-6 pt-6 text-center text-slate-400">
-              {/* TODO: xlsx 解析表格组件（编辑/预览共享此插槽） */}
-              <FileText size={40} className="mx-auto mb-2 text-slate-300" />
-              <p className="text-sm">xlsx 表格预览组件待实现（与编辑器共享插槽）</p>
-            </div>
+        {previewing.id != null ? (
+          <WellLogViewer fileId={previewing.id} name={previewing.name} key={previewing.id} />
+        ) : (
+          <div className="flex-1 flex items-center justify-center text-slate-400">
+            该记录无关联文件，无法预览
           </div>
-        </div>
+        )}
       </div>
     );
   }

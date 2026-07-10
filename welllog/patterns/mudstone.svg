@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="8" viewBox="0 0 16 8">
+  <defs>
+    <pattern id="pat-mudstone" patternUnits="userSpaceOnUse" width="16" height="8">
+      <rect width="16" height="8" fill="#d1d5db"/>
+      <!-- 泥岩: 短横线/虚线 (GB/T 岩石图式 泥岩符号) -->
+      <line x1="0" y1="2" x2="6" y2="2" stroke="#4b5563" stroke-width="0.5"/>
+      <line x1="9" y1="4" x2="16" y2="4" stroke="#4b5563" stroke-width="0.5"/>
+      <line x1="2" y1="6" x2="8" y2="6" stroke="#4b5563" stroke-width="0.5"/>
+    </pattern>
+  </defs>
+  <rect width="16" height="8" fill="url(#pat-mudstone)"/>
+</svg>

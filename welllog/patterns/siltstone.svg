@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 12 12">
+  <defs>
+    <pattern id="pat-siltstone" patternUnits="userSpaceOnUse" width="12" height="12">
+      <rect width="12" height="12" fill="#f3f4f6"/>
+      <!-- 粉砂岩: 细密小圆点 (GB/T 岩石图式 粉砂岩符号) -->
+      <circle cx="2" cy="2" r="0.5" fill="#6b7280"/>
+      <circle cx="7" cy="4" r="0.4" fill="#6b7280"/>
+      <circle cx="4" cy="7" r="0.5" fill="#6b7280"/>
+      <circle cx="10" cy="2" r="0.4" fill="#6b7280"/>
+      <circle cx="1" cy="10" r="0.5" fill="#6b7280"/>
+      <circle cx="6" cy="9" r="0.4" fill="#6b7280"/>
+      <circle cx="10" cy="7" r="0.5" fill="#6b7280"/>
+      <circle cx="9" cy="11" r="0.4" fill="#6b7280"/>
+      <circle cx="3" cy="5" r="0.3" fill="#6b7280"/>
+      <circle cx="8" cy="1" r="0.3" fill="#6b7280"/>
+    </pattern>
+  </defs>
+  <rect width="12" height="12" fill="url(#pat-siltstone)"/>
+</svg>

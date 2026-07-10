@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="18" viewBox="0 0 24 18">
+  <defs>
+    <pattern id="pat-mixed" patternUnits="userSpaceOnUse" width="24" height="18">
+      <rect width="24" height="18" fill="#bbf7d0"/>
+      <rect x="0" y="0" width="12" height="9" fill="#fef9c3"/>
+      <rect x="12" y="9" width="12" height="9" fill="#fef9c3"/>
+      <circle cx="6" cy="4.5" r="1.0" fill="#92400e"/>
+      <circle cx="18" cy="13.5" r="1.0" fill="#92400e"/>
+      <line x1="12" y1="2" x2="24" y2="2" stroke="#047857" stroke-width="0.5"/>
+      <line x1="14" y1="5" x2="22" y2="5" stroke="#047857" stroke-width="0.5"/>
+      <line x1="0" y1="11" x2="10" y2="11" stroke="#047857" stroke-width="0.5"/>
+      <line x1="2" y1="14" x2="8" y2="14" stroke="#047857" stroke-width="0.5"/>
+    </pattern>
+  </defs>
+  <rect width="24" height="18" fill="url(#pat-mixed)"/>
+</svg>

@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <defs>
+    <pattern id="pat-dolomite" patternUnits="userSpaceOnUse" width="16" height="16">
+      <rect width="16" height="16" fill="#dbeafe"/>
+      <!-- 白云岩: 菱形网格/斜交线 (GB/T 岩石图式 白云岩符号) -->
+      <!-- Horizontal lines -->
+      <line x1="0" y1="0" x2="16" y2="0" stroke="#1e40af" stroke-width="0.5"/>
+      <line x1="0" y1="8" x2="16" y2="8" stroke="#1e40af" stroke-width="0.5"/>
+      <!-- Diagonal lines forming rhombus pattern -->
+      <line x1="4" y1="0" x2="8" y2="8" stroke="#1e40af" stroke-width="0.4"/>
+      <line x1="12" y1="0" x2="16" y2="8" stroke="#1e40af" stroke-width="0.4"/>
+      <line x1="0" y1="0" x2="4" y2="8" stroke="#1e40af" stroke-width="0.4"/>
+      <line x1="8" y1="0" x2="12" y2="8" stroke="#1e40af" stroke-width="0.4"/>
+    </pattern>
+  </defs>
+  <rect width="16" height="16" fill="url(#pat-dolomite)"/>
+</svg>

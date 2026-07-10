@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="6" viewBox="0 0 16 6">
+  <defs>
+    <pattern id="pat-shale" patternUnits="userSpaceOnUse" width="16" height="6">
+      <rect width="16" height="6" fill="#9ca3af"/>
+      <!-- 页岩: 密集平行横线 (GB/T 岩石图式 页岩符号) -->
+      <line x1="0" y1="1.5" x2="16" y2="1.5" stroke="#374151" stroke-width="0.6"/>
+      <line x1="0" y1="4.5" x2="16" y2="4.5" stroke="#374151" stroke-width="0.6"/>
+    </pattern>
+  </defs>
+  <rect width="16" height="6" fill="url(#pat-shale)"/>
+</svg>
