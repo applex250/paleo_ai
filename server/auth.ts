@@ -132,36 +132,40 @@ export const requireAuth = (req: Request, res: Response, next: NextFunction): vo
 };
 
 // ---------- 预置用户 ----------
+// 默认预置：admin + user1~user5（user1~5 密码均为 12345）。可用 SEED_USER 环境变量覆盖。
 // SEED_USER 格式：user1:pass1[:displayName],user2:pass2...
-// 表为空时才建（已有用户则跳过，不会重复建/改密）
+const DEFAULT_SEED =
+  'admin:changeme123,user1:12345,user2:12345,user3:12345,user4:12345,user5:12345';
+// 每次启动都保证预置用户存在；已存在的跳过（不重置密码），缺失的才建。
 export const seedUsers = (): void => {
-  const row = db.prepare('SELECT COUNT(*) AS c FROM users').get() as { c: number };
-  if (row.c > 0) return;
-  const seedRaw = (process.env.SEED_USER ?? 'admin:changeme123').trim();
+  const seedRaw = (process.env.SEED_USER ?? DEFAULT_SEED).trim();
   const entries = seedRaw
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean);
+  const existing = new Set(
+    (db.prepare('SELECT username FROM users').all() as Array<{ username: string }>).map(
+      (r) => r.username,
+    ),
+  );
   const stmt = db.prepare(
-    'INSERT INTO users (username, password_hash, display_name, created_at) VALUES (?, ?, ?, ?)',
+    'INSERT OR IGNORE INTO users (username, password_hash, display_name, created_at) VALUES (?, ?, ?, ?)',
   );
   const now = isoNow();
-  const made: string[] = [];
+  const created: string[] = [];
   for (const e of entries) {
     const parts = e.split(':');
     const username = parts[0]?.trim();
-    if (!username) continue;
+    if (!username || existing.has(username)) continue; // 已存在跳过，避免重复 hash
     const pass = parts[1] ?? 'changeme123';
     const displayName = parts[2]?.trim() || username;
     stmt.run(username, hashPassword(pass), displayName, now);
-    made.push(username);
+    created.push(username);
   }
-  if (made.length === 0) {
-    stmt.run('admin', hashPassword('changeme123'), 'admin', now);
-    made.push('admin');
-    console.log('[auth] 已创建默认用户 admin（密码 changeme123），请尽快修改！');
-  } else {
-    console.log(`[auth] 已创建预置用户：${made.join(', ')}（可用 SEED_USER 环境变量配置）`);
+  if (created.length > 0) {
+    console.log(
+      `[auth] 预置用户已创建：${created.join(', ')}（可用 SEED_USER 配置；已存在用户不重置密码）`,
+    );
   }
 };
 seedUsers();
