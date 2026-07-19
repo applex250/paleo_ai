@@ -1,14 +1,17 @@
-// 井剖面 SVG 画布：固定左列深度尺 + 内容区固定列宽/横向滚动 + 深度滚轮缩放/拖拽/十字光标。
+// 井剖面 SVG 画布：固定左列深度尺 + 内容区固定列宽/横向滚动 + 深度滚轮缩放/平移/十字光标。
 //
 // ⚡ 深度尺剥离出横向滚动区，固定左侧常驻（对齐 GeoViz DepthRuler）；与内容区共享几何 → 纵向对齐。
 // ⚡ 内容区 GeoViz 横向规则：effectiveWidth=max(naturalWidth, viewport)，scale≥1 只拉伸不压缩；超出横向滚动。
 // ⚡ activeTracks 空 / naturalWidth≤0 → 内容区空态占位（不除零）。
 // ⚡ 十字光标：水平线在内容区，深度读数徽标在固定深度列（滚动时常驻）。
 // ⚡ range 受控（由 WellLogViewer 持有）；滚轮用 getScreenCTM().inverse() 反算本地 Y → depth；RAF 合并。
+// ⚡ 滚轮优先级：Shift 横移 scrollLeft → Ctrl 缩放 → 普通纵移 range；无左键拖拽纵移。
+// ⚡ 区间编辑模式：左键仅在图体区域框选深度（>4px 触发回调）；关闭时左键不改变视图。
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { MIN_DEPTH_SPAN, THEME, TRACK_WIDTH } from '../config';
 import { hasTrackData } from '../transform';
 import type { AnyTrackConfig, WellLogData } from '../types';
+import { isDragTooSmall, normalizeDepthRange } from '../intervalEdits';
 import { PATTERNS } from '../patterns';
 import { yToDepth } from '../geo';
 import DepthTrack from './tracks/DepthTrack';
@@ -17,7 +20,7 @@ import IntervalTrack from './tracks/IntervalTrack';
 import LithologyTrack from './tracks/LithologyTrack';
 import SystemsTractTrack from './tracks/SystemsTractTrack';
 import TextTrack from './tracks/TextTrack';
-import type { TrackProps } from './tracks/types';
+import type { IntervalBlockClickPayload, TrackProps } from './tracks/types';
 
 interface Props {
   data: WellLogData;
@@ -28,6 +31,15 @@ interface Props {
   onOpenCurveMenu?: (primary: string, anchor: DOMRect) => void; // 列头 ➕ 打开副曲线下拉
   onCursor?: (depth: number, clientX: number, clientY: number) => void; // 鼠标在内容区的深度+屏幕坐标（数值读出框）
   onCursorLeave?: () => void; // 鼠标离开内容区
+  /** 开启后左键在图体区域框选深度区间（不平移视图）。 */
+  intervalSelectMode?: boolean;
+  /** 框选超过 4px 后回调已规范化 (top, bottom)。 */
+  onIntervalSelect?: (top: number, bottom: number) => void;
+  /**
+   * 区间编辑模式下同一块两次右键；未传则不启用块编辑。
+   * 不影响框选、滚轮缩放/平移与十字光标。
+   */
+  onIntervalBlockRightDoubleClick?: (payload: IntervalBlockClickPayload) => void;
 }
 
 const DEPTH_CFG = { type: 'depth' as const, width: TRACK_WIDTH.depth, label: '深度', label2: '(m)' };
@@ -57,11 +69,26 @@ function renderTrack(p: TrackProps): React.ReactElement | null {
   }
 }
 
-const WellLogCanvas: React.FC<Props> = ({ data, tracks, range, onRangeChange, curveRanges, onOpenCurveMenu, onCursor, onCursorLeave }) => {
+const WellLogCanvas: React.FC<Props> = ({
+  data,
+  tracks,
+  range,
+  onRangeChange,
+  curveRanges,
+  onOpenCurveMenu,
+  onCursor,
+  onCursorLeave,
+  intervalSelectMode = false,
+  onIntervalSelect,
+  onIntervalBlockRightDoubleClick,
+}) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentSvgRef = useRef<SVGSVGElement>(null);
   const [size, setSize] = useState({ w: 800, h: 600 });
   const [cursorY, setCursorY] = useState<number | null>(null);
+  // 区间框选：记录 SVG 本地 Y（仅 content 区）；endY 同步写 ref，避免 pointerup 读到过期 state
+  const selectRef = useRef<{ startY: number; endY: number; pointerId: number } | null>(null);
+  const [selectBand, setSelectBand] = useState<{ y0: number; y1: number } | null>(null);
 
   // 量滚动容器视口宽 + 行高
   useEffect(() => {
@@ -75,7 +102,10 @@ const WellLogCanvas: React.FC<Props> = ({ data, tracks, range, onRangeChange, cu
     return () => ro.disconnect();
   }, []);
 
-  const activeTracks = useMemo(() => tracks.filter((t) => hasTrackData(t, data)), [tracks, data]);
+  const activeTracks = useMemo(
+    () => tracks.filter((t) => t.alwaysVisible || hasTrackData(t, data)),
+    [tracks, data],
+  );
 
   // 内容区布局：固定宽，effectiveWidth=max(natural,viewport)，scale≥1
   const layout = useMemo(() => {
@@ -144,12 +174,19 @@ const WellLogCanvas: React.FC<Props> = ({ data, tracks, range, onRangeChange, cu
     [],
   );
 
-  // 滚轮缩放（原生 non-passive）
+  // 滚轮：Shift 横移 → Ctrl 缩放 → 普通纵移（原生 non-passive）
   useEffect(() => {
     const svg = contentSvgRef.current;
     if (!svg) return;
     const onWheel = (e: WheelEvent): void => {
       e.preventDefault();
+      // Shift+滚轮：横向平移轨道（优先于 Ctrl，不改 range）
+      if (e.shiftKey) {
+        const dx = e.deltaX !== 0 ? e.deltaX : e.deltaY;
+        const sc = scrollRef.current;
+        if (sc) sc.scrollLeft += dx;
+        return;
+      }
       const [top, bot] = rangeRef.current;
       const span = bot - top;
       if (e.ctrlKey) {
@@ -193,16 +230,18 @@ const WellLogCanvas: React.FC<Props> = ({ data, tracks, range, onRangeChange, cu
     return () => svg.removeEventListener('wheel', onWheel);
   }, [contentY, contentH, data, onRangeChange, empty]);
 
-  // 拖拽平移 + 十字光标
-  const dragRef = useRef<{ startLocalY: number; startTop: number; startBot: number } | null>(null);
+  // 十字光标 + 深度读数（无左键拖拽 range）；区间模式下叠加框选带
   const onPointerDown = (e: React.PointerEvent): void => {
+    if (!intervalSelectMode || e.button !== 0) return;
     const svg = contentSvgRef.current;
     if (!svg) return;
     const localY = clientToSvgY(svg, e.clientY);
-    if (localY == null) return;
-    dragRef.current = { startLocalY: localY, startTop: range[0], startBot: range[1] };
+    if (localY == null || localY < contentY || localY > contentY + contentH) return;
+    selectRef.current = { startY: localY, endY: localY, pointerId: e.pointerId };
+    setSelectBand({ y0: localY, y1: localY });
     svg.setPointerCapture(e.pointerId);
   };
+
   const onPointerMove = (e: React.PointerEvent): void => {
     const svg = contentSvgRef.current;
     if (!svg) return;
@@ -212,33 +251,46 @@ const WellLogCanvas: React.FC<Props> = ({ data, tracks, range, onRangeChange, cu
       onCursorLeave?.();
       return;
     }
+    const clampedY = Math.max(contentY, Math.min(contentY + contentH, localY));
     const inContent = localY >= contentY && localY <= contentY + contentH;
-    setCursorY(inContent ? localY : null);
-    if (inContent) {
-      const depth = yToDepth(localY, range[0], range[1], contentY, contentH);
+    setCursorY(inContent || selectRef.current ? clampedY : null);
+    if (inContent || selectRef.current) {
+      const depth = yToDepth(clampedY, range[0], range[1], contentY, contentH);
       onCursor?.(depth, e.clientX, e.clientY);
     } else {
       onCursorLeave?.();
     }
-    const d = dragRef.current;
-    if (!d) return;
-    const span = d.startBot - d.startTop;
-    const depthDelta = ((localY - d.startLocalY) / contentH) * span;
-    let nt = d.startTop - depthDelta;
-    let nb = d.startBot - depthDelta;
-    if (nt < data.topDepth) {
-      nb += data.topDepth - nt;
-      nt = data.topDepth;
+    const sel = selectRef.current;
+    if (sel) {
+      sel.endY = clampedY;
+      setSelectBand({ y0: sel.startY, y1: clampedY });
     }
-    if (nb > data.bottomDepth) {
-      nt -= nb - data.bottomDepth;
-      nb = data.bottomDepth;
-    }
-    scheduleRange([nt, nb]);
   };
-  const onPointerUp = (e: React.PointerEvent): void => {
-    dragRef.current = null;
-    contentSvgRef.current?.releasePointerCapture?.(e.pointerId);
+
+  const finishSelect = (): void => {
+    const sel = selectRef.current;
+    if (!sel) return;
+    selectRef.current = null;
+    contentSvgRef.current?.releasePointerCapture?.(sel.pointerId);
+    setSelectBand(null);
+    if (!onIntervalSelect) return;
+    if (isDragTooSmall(sel.startY, sel.endY)) return;
+    const d0 = yToDepth(sel.startY, range[0], range[1], contentY, contentH);
+    const d1 = yToDepth(sel.endY, range[0], range[1], contentY, contentH);
+    const [top, bottom] = normalizeDepthRange(d0, d1);
+    onIntervalSelect(top, bottom);
+  };
+
+  const onPointerUp = (): void => {
+    if (selectRef.current) finishSelect();
+  };
+
+  const onPointerCancel = (e: React.PointerEvent): void => {
+    if (selectRef.current) {
+      selectRef.current = null;
+      setSelectBand(null);
+      contentSvgRef.current?.releasePointerCapture?.(e.pointerId);
+    }
   };
 
   const cursorDepth =
@@ -286,7 +338,7 @@ const WellLogCanvas: React.FC<Props> = ({ data, tracks, range, onRangeChange, cu
       <div
         ref={scrollRef}
         className="flex-1 overflow-x-auto overflow-y-hidden"
-        style={{ cursor: dragRef.current ? 'grabbing' : 'crosshair' }}
+        style={{ cursor: intervalSelectMode ? 'ns-resize' : 'crosshair' }}
       >
         {empty ? (
           <div className="w-full h-full flex items-center justify-center text-slate-400 text-sm">
@@ -301,9 +353,12 @@ const WellLogCanvas: React.FC<Props> = ({ data, tracks, range, onRangeChange, cu
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
+            onPointerCancel={onPointerCancel}
             onPointerLeave={() => {
-              setCursorY(null);
-              onCursorLeave?.();
+              if (!selectRef.current) {
+                setCursorY(null);
+                onCursorLeave?.();
+              }
             }}
           >
             <defs>
@@ -347,6 +402,10 @@ const WellLogCanvas: React.FC<Props> = ({ data, tracks, range, onRangeChange, cu
                 curveRange:
                   it.cfg.type === 'curves' ? curveRanges?.[it.cfg.curveNames[0]] : undefined,
                 onOpenCurveMenu,
+                // 仅编辑模式透传右键双击；关闭时 undefined，块不响应右键编辑
+                onIntervalBlockRightDoubleClick: intervalSelectMode
+                  ? onIntervalBlockRightDoubleClick
+                  : undefined,
               };
               return (
                 <g key={`${it.cfg.type}-${it.cfg.label}-${i}`} transform={`translate(${it.x},0)`}>
@@ -354,6 +413,19 @@ const WellLogCanvas: React.FC<Props> = ({ data, tracks, range, onRangeChange, cu
                 </g>
               );
             })}
+
+            {selectBand && (
+              <rect
+                x={0}
+                y={Math.min(selectBand.y0, selectBand.y1)}
+                width={layout.effectiveWidth}
+                height={Math.max(1, Math.abs(selectBand.y1 - selectBand.y0))}
+                fill="rgba(37, 99, 235, 0.18)"
+                stroke="#2563eb"
+                strokeWidth={1}
+                pointerEvents="none"
+              />
+            )}
 
             {cursorY != null && (
               <line x1={0} y1={cursorY} x2={layout.effectiveWidth} y2={cursorY} stroke="#ef4444" strokeWidth={1} strokeDasharray="4 3" pointerEvents="none" />

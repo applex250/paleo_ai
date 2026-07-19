@@ -61,6 +61,7 @@ export interface DatasetFile {
   date: string; // 文件修改日期 YYYY-MM-DD
   status: number; // 0原始 1未完成 2工作中 3已完成
   statusLabel?: string; // 中文标签（后端统一映射）
+  project?: string; // 单井数据项目归属；地震/切片接口可能无此字段
 }
 
 // 登录用户（前端镜像 server/auth.ts 的 AuthUser）

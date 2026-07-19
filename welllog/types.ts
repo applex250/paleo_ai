@@ -5,7 +5,7 @@ export type LineStyle = 'solid' | 'dashed' | 'dotted';
 
 /** 测井曲线（values 允许 null，用于表达缺测 "-9999" 的断点）。对应 models.CurveData。 */
 export interface CurveData {
-  name: string; // geoviz 名：AC/GR/RT/RXO（已由别名解析）
+  name: string; // xlsx 原列名（如 DT/MLR4C/MLR1C/GR）；不改写为 AC/RT/RXO
   unit?: string;
   depth: number[];
   values: (number | null)[];
@@ -14,11 +14,21 @@ export interface CurveData {
   lineStyle: LineStyle;
 }
 
+/**
+ * 区间稳定来源：原 XLSX 行 或 本会话/已保存的 create operationId。
+ * 用于精确删除同名同深度重复行（JSON 增量 delete，不回传整表）。
+ */
+export type IntervalSource =
+  | { type: 'xlsx'; sheet: string; row: number }
+  | { type: 'create'; operationId: string };
+
 /** 通用深度区间项（地层/层序/岩性描述等）。对应 models.IntervalItem。 */
 export interface IntervalItem {
   top: number;
   bottom: number;
   name: string;
+  /** 岩性/微相等可编辑区间的来源；删除时按此精确定位。 */
+  source?: IntervalSource;
 }
 
 /** 岩性区间（带纹样填充）。对应 models.LithologyInterval。 */
@@ -27,6 +37,7 @@ export interface LithologyInterval {
   bottom: number;
   lithology: string;
   description?: string;
+  source?: IntervalSource;
 }
 
 export interface FaciesData {
@@ -58,6 +69,11 @@ export interface WellLogData {
   lithology: LithologyInterval[];
   facies?: FaciesData;
   intervals?: WellIntervals;
+  /**
+   * 全局相名称 → 唯一 HEX（微相/亚相/相同名同色）。
+   * 由加载时 POST /facies-colors 填充；轨道按完整名称精确取色。
+   */
+  faciesColors?: Record<string, string>;
 }
 
 // ---- 轨道配置（移植 config.py）----
@@ -76,6 +92,8 @@ export interface TrackConfig {
   label: string;
   label2?: string;
   group?: string; // 分组表头名（如 "地层系统"/"沉积相"）
+  /** 没有对应数据时仍显示表头、网格和空白内容区。 */
+  alwaysVisible?: boolean;
 }
 
 export interface DepthTrackConfig extends TrackConfig {

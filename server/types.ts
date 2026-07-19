@@ -9,6 +9,7 @@ export interface FileMeta {
   date: string;
   status: number; // 0原始 1未完成 2工作中 3已完成
   statusLabel?: string; // 中文标签（后端统一映射）
+  project?: string; // 单井数据项目归属；地震/切片无此字段
 }
 
 // 标注状态枚举（与前端共享语义）

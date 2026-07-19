@@ -9,18 +9,33 @@ export interface LockState {
   message: string; // 提示（续期失败警告 / 抢占提示）
 }
 
+/** 心跳 tick 上挂载的自动保存钩子（懒取，避免闭包旧值）。 */
+export interface AnnotationLockAutosave {
+  /** 是否有未保存区间（有则强制 heartbeat active 续期） */
+  hasUnsaved?: () => boolean;
+  /** 一轮自动保存（内部可含失败重试）；心跳成功后调用 */
+  requestAutosave?: () => Promise<boolean>;
+  /** 退出/完成中等：跳过本拍自动保存 */
+  isAutosaveBlocked?: () => boolean;
+}
+
 // 锁生命周期 + 5min 心跳调度。
-// 每次 tick：读 isActiveRef → true 调 heartbeat(active=true)（续期），
-// false 调 heartbeat(active=false)（仅保活，不续期）→ 之后 resetActive。
+// 每次 tick：
+//   1) activeForRenew = 用户活跃 OR 有 pending → heartbeat
+//   2) 心跳成功且未 block 且仍有 pending → requestAutosave（失败也会在下 tick 再试）
 export const useAnnotationLock = (
   datasetId: number | null,
   isActiveRef: { current: boolean },
   resetActive: () => void,
+  autosave?: AnnotationLockAutosave,
 ): LockState => {
   const [state, setState] = useState<LockState>({ locked: false, readOnly: false, message: '' });
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const idRef = useRef<number | null>(datasetId);
   const stoppedRef = useRef(false);
+  const tickInFlightRef = useRef(false);
+  const autosaveRef = useRef(autosave);
+  autosaveRef.current = autosave;
 
   const stop = useCallback(() => {
     if (timerRef.current) {
@@ -30,20 +45,41 @@ export const useAnnotationLock = (
   }, []);
 
   const tick = useCallback(async () => {
+    if (tickInFlightRef.current) return;
     const id = idRef.current;
     if (id == null || stoppedRef.current) return;
-    const active = isActiveRef.current;
-    const res = await heartbeatAnnotation(id, active);
-    if (stoppedRef.current) return;
-    if (!res || !res.ok) {
-      // 423：锁被他人抢占或已过期失效 → 只读 + 停计时器
-      setState({ locked: false, readOnly: true, message: res?.error || '编辑权限已失效' });
-      stop();
-      return;
+
+    tickInFlightRef.current = true;
+    try {
+      const hasUnsaved = autosaveRef.current?.hasUnsaved?.() ?? false;
+      // 有待保存时强制续期，避免静置标注后锁过期导致无法保存
+      const active = isActiveRef.current || hasUnsaved;
+      const res = await heartbeatAnnotation(id, active);
+      if (stoppedRef.current) return;
+
+      if (!res || !res.ok) {
+        // 423：锁被他人抢占或已过期失效 → 只读 + 停计时器（不再自动保存）
+        setState({ locked: false, readOnly: true, message: res?.error || '编辑权限已失效' });
+        stop();
+        return;
+      }
+
+      // 成功：清掉之前的续期失败警告
+      setState((s) => (s.message ? { ...s, message: '' } : s));
+      resetActive(); // 接口调用之后重置活跃标记
+
+      const blocked = autosaveRef.current?.isAutosaveBlocked?.() ?? false;
+      const stillUnsaved = autosaveRef.current?.hasUnsaved?.() ?? false;
+      if (!blocked && stillUnsaved && autosaveRef.current?.requestAutosave) {
+        try {
+          await autosaveRef.current.requestAutosave();
+        } catch {
+          // 自动保存异常不推翻锁状态；pending 保留，下次 tick 再试
+        }
+      }
+    } finally {
+      tickInFlightRef.current = false;
     }
-    // 成功：清掉之前的续期失败警告
-    setState((s) => (s.message ? { ...s, message: '' } : s));
-    resetActive(); // 接口调用之后重置活跃标记
   }, [isActiveRef, resetActive, stop]);
 
   useEffect(() => {

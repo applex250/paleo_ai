@@ -125,7 +125,7 @@ const CurveRow: React.FC<RowProps> = ({ curve, checked, range, onToggle, onRange
 
   const inputCls = `w-16 px-1 py-0.5 border rounded text-xs ${
     flash ? 'border-red-500 animate-pulse' : 'border-slate-300'
-  }`;
+    } select-text`;
 
   return (
     <div className="px-3 py-1 hover:bg-slate-50">

@@ -10,7 +10,7 @@ import { authRouter, requireAuth } from './auth';
 import { annotationRouter, sweepExpiredLocks } from './annotation';
 
 const app = express();
-const PORT = Number(process.env.PORT ?? 3000);
+const PORT = Number(process.env.PORT ?? 2999);
 
 // 上传：前端把文件原始字节作为 body 发送（非 multipart）
 app.use('/api/datasets', express.raw({ type: '*/*', limit: '200mb' }));
@@ -68,11 +68,22 @@ app.post('/api/datasets/:key', async (req, res) => {
 
   try {
     if (FOLDERS[key].useDb) {
+      // 单井：必须提供修剪后非空的 project
+      const project = String((req.query.project as string | undefined) ?? '').trim();
+      if (!project) return send(res, 400, { error: '项目名称不能为空' });
       // 单井：xlsx 原样、xml → worker 转 xlsx → 入库 + 改名 <id>.xlsx
       const alreadyXlsx = ext === 'xlsx';
       const data: Buffer = alreadyXlsx ? buf : Buffer.from(await runConvert(Uint8Array.from(buf)));
-      const { id, storedFile } = await enqueue(() => importDanjing(data, friendlyName));
-      return send(res, 200, { ok: true, key, id, savedAs: storedFile, toXlsx: true, converted: !alreadyXlsx });
+      const { id, storedFile } = await enqueue(() => importDanjing(data, friendlyName, project));
+      return send(res, 200, {
+        ok: true,
+        key,
+        id,
+        savedAs: storedFile,
+        toXlsx: true,
+        converted: !alreadyXlsx,
+        project,
+      });
     }
     // 地震/切片：原样落盘（同样走队列串行写）
     const outName = sanitize(filename);
