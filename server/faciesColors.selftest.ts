@@ -1,8 +1,10 @@
 /**
- * 沉积相颜色注册表自测：规范化、生成器、持久化唯一、规则导入同事务登记。
+ * 沉积相颜色注册表 + 亚相列式规则自测：
+ * 规范化、生成器、持久化唯一、规则导入同事务登记、XLSX 列式解析。
  * 运行：npx tsx server/faciesColors.selftest.ts
  * 使用唯一前缀名称并在结束时清理，不改动业务 xlsx（data01/danjing）。
  */
+import * as XLSX from 'xlsx';
 import {
   db,
   ensureFaciesColors,
@@ -10,11 +12,13 @@ import {
   hslToHex,
   lookupFaciesColors,
   normalizeFaciesName,
-  replaceMicroPhaseRules,
-  listMicroPhaseRules,
+  replaceMicroPhaseRuleGroups,
+  listMicroPhaseRuleGroups,
+  countMicroPhaseRuleStats,
   SAFE_FACIES_COLOR,
+  type MicroPhaseRuleGroup,
 } from './db';
-import { parseFaciesColorsPayload } from './annotation';
+import { parseFaciesColorsPayload, parseMicroPhaseRulesXlsx } from './annotation';
 
 let passed = 0;
 let failed = 0;
@@ -46,12 +50,20 @@ function tname(s: string): string {
 function cleanup(): void {
   const del = db.prepare(`DELETE FROM facies_color_registry WHERE name LIKE ?`);
   del.run(`${PREFIX}%`);
-  // 若规则表被自测替换，尽量不留下前缀规则（仅当列表全是自测名时恢复空——生产库可能有真实规则，
-  // 故规则替换测试使用独立前缀并在测后仅删前缀色，规则表若被污染则用 restore 处理）
+}
+
+function aoaToXlsxBuf(aoa: unknown[][]): Buffer {
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  XLSX.utils.book_append_sheet(wb, ws, 'rules');
+  // 加第二表，确认解析只读第一表
+  const ws2 = XLSX.utils.aoa_to_sheet([['忽略', '第二表']]);
+  XLSX.utils.book_append_sheet(wb, ws2, 'other');
+  return Buffer.from(XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as ArrayBuffer);
 }
 
 // 保存规则表现场
-const rulesBackup = listMicroPhaseRules();
+const rulesBackup: MicroPhaseRuleGroup[] = listMicroPhaseRuleGroups();
 
 console.log('--- normalizeFaciesName ---');
 {
@@ -129,24 +141,103 @@ console.log('--- parseFaciesColorsPayload 严格校验 ---');
   }
 }
 
-console.log('--- replaceMicroPhaseRules 同事务注册颜色 ---');
+console.log('--- parseMicroPhaseRulesXlsx 列式规则 ---');
 {
-  const r1 = tname('规则微相甲');
-  const r2 = tname('规则微相乙');
-  replaceMicroPhaseRules([r1, r2]);
-  const listed = listMicroPhaseRules();
-  assertEq(listed, [r1, r2], '规则列表已替换');
-  const colors = lookupFaciesColors([r1, r2]);
-  assert(colors[r1] != null && colors[r2] != null, '规则名已登记颜色');
-  assert(colors[r1] !== colors[r2], '规则两名不同色');
-  // 恢复原规则（若原为空则写回需至少一项——replace 要求非空）
+  // 合法：两列亚相 + 微相；空白列忽略；组内去重；跨组同名允许；trim/NFC
+  const nfcA = 'A\u0301'; // Á decomposed
+  const bufOk = aoaToXlsxBuf([
+    ['  三角洲前缘 ', '潮坪', '', nfcA],
+    ['河口坝', '泥坪', '', 'm1'],
+    ['远砂坝', '  砂坪 ', '', 'm1'], // 组内重复 m1
+    ['河口坝', '混合坪', '', ''], // 组内重复河口坝
+    ['', '', '', ''],
+  ]);
+  const parsedOk = parseMicroPhaseRulesXlsx(bufOk);
+  assert(parsedOk.ok, '合法列式 XLSX');
+  if (parsedOk.ok) {
+    assertEq(parsedOk.groups.length, 3, '忽略全空列，3 组');
+    assertEq(parsedOk.groups[0], {
+      subPhase: '三角洲前缘',
+      microPhases: ['河口坝', '远砂坝'],
+    }, '列0 组内去重+trim');
+    assertEq(parsedOk.groups[1], {
+      subPhase: '潮坪',
+      microPhases: ['泥坪', '砂坪', '混合坪'],
+    }, '列1');
+    assertEq(parsedOk.groups[2].subPhase, nfcA.normalize('NFC'), '列2 亚相 NFC');
+    assertEq(parsedOk.groups[2].microPhases, ['m1'], '列2 组内去重 m1');
+    const stats = countMicroPhaseRuleStats(parsedOk.groups);
+    assertEq(stats.subPhaseCount, 3, 'subPhaseCount');
+    assertEq(stats.microPhaseCount, 2 + 3 + 1, 'microPhaseCount 跨组计数');
+  }
+
+  // 有亚相无微相 → 拒绝
+  const bufNoMicro = aoaToXlsxBuf([['孤立亚相'], ['']]);
+  const noMicro = parseMicroPhaseRulesXlsx(bufNoMicro);
+  assert(!noMicro.ok, '有亚相无微相拒绝');
+
+  // 有微相无亚相 → 拒绝
+  const bufNoSub = aoaToXlsxBuf([[''], ['孤儿微相']]);
+  const noSub = parseMicroPhaseRulesXlsx(bufNoSub);
+  assert(!noSub.ok, '有微相无亚相拒绝');
+
+  // 全空 → 拒绝
+  const bufEmpty = aoaToXlsxBuf([['', ''], ['', '']]);
+  const empty = parseMicroPhaseRulesXlsx(bufEmpty);
+  assert(!empty.ok, '全空拒绝');
+
+  // 空 buffer
+  assert(!parseMicroPhaseRulesXlsx(Buffer.alloc(0)).ok, '空 buffer 拒绝');
+}
+
+console.log('--- replaceMicroPhaseRuleGroups 同事务注册颜色 ---');
+{
+  const sub1 = tname('亚相甲');
+  const sub2 = tname('亚相乙');
+  const m1 = tname('规则微相甲');
+  const m2 = tname('规则微相乙');
+  const m3 = tname('规则微相丙');
+  // 跨组允许同名微相
+  const shared = tname('共享微相');
+  const groups: MicroPhaseRuleGroup[] = [
+    { subPhase: sub1, microPhases: [m1, m2, shared] },
+    { subPhase: sub2, microPhases: [m3, shared] },
+  ];
+  replaceMicroPhaseRuleGroups(groups);
+  const listed = listMicroPhaseRuleGroups();
+  assertEq(listed, groups, '规则组已替换');
+  const colors = lookupFaciesColors([m1, m2, m3, shared]);
+  assert(
+    colors[m1] != null && colors[m2] != null && colors[m3] != null && colors[shared] != null,
+    '全部微相已登记颜色',
+  );
+  assert(colors[m1] !== colors[m2], '不同微相不同色');
+  assertEq(colors[shared], colors[shared], '跨组同名同色');
+
+  // 恢复原规则
   if (rulesBackup.length > 0) {
-    replaceMicroPhaseRules(rulesBackup);
-    assertEq(listMicroPhaseRules(), rulesBackup, '规则表已恢复');
+    replaceMicroPhaseRuleGroups(rulesBackup);
+    assertEq(listMicroPhaseRuleGroups(), rulesBackup, '规则表已恢复');
   } else {
-    // 原库无规则：再替换为单占位并清理？保持自测规则会污染；改为删规则表行
-    db.prepare(`DELETE FROM annotation_micro_phase_rules`).run();
-    assertEq(listMicroPhaseRules().length, 0, '规则表清空恢复');
+    db.prepare(`DELETE FROM annotation_subphase_rule_microphases`).run();
+    db.prepare(`DELETE FROM annotation_subphase_rule_groups`).run();
+    assertEq(listMicroPhaseRuleGroups().length, 0, '规则表清空恢复');
+  }
+}
+
+console.log('--- 旧扁平表不可用于推荐（迁移后无残留）---');
+{
+  const legacy = db
+    .prepare(
+      `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'annotation_micro_phase_rules'`,
+    )
+    .get() as { name?: string } | undefined;
+  assert(!legacy?.name, '旧扁平 annotation_micro_phase_rules 已移除');
+  // 列表仅来自分组表；空/备份恢复后不会冒出无关联扁平名
+  const groups = listMicroPhaseRuleGroups();
+  for (const g of groups) {
+    assert(typeof g.subPhase === 'string' && g.subPhase.length > 0, '每组有亚相');
+    assert(Array.isArray(g.microPhases) && g.microPhases.length > 0, '每组有微相');
   }
 }
 

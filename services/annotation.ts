@@ -1,7 +1,7 @@
 // 数据编辑 API：lock / save / finish / heartbeat / intervals / micro-phase-rules / facies-colors
 // 统一 .catch 兜底：网络错误返回 { ok:false, error }，调用方不必 try/catch。
 // 区间保存仅传 JSON 增量，绝不上传 XLSX / base64。
-// 规则导入：POST 原始 XLSX 字节到服务端解析并持久化。
+// 规则导入：POST 原始 XLSX 字节到服务端解析并持久化为 [{ subPhase, microPhases[] }]。
 // 相颜色：POST 名称数组，服务端确保注册并返回名称→HEX。
 import { apiFetch } from './http';
 
@@ -15,9 +15,19 @@ interface ApiResult {
   renew?: boolean;
 }
 
+/** 亚相规则组：一列亚相 → 有序微相列表。 */
+export interface MicroPhaseRuleGroup {
+  subPhase: string;
+  microPhases: string[];
+}
+
 export interface MicroPhaseRulesResult extends ApiResult {
-  names?: string[];
-  count?: number;
+  /** 有序规则组（列序）。 */
+  groups?: MicroPhaseRuleGroup[];
+  /** 亚相组数量。 */
+  subPhaseCount?: number;
+  /** 微相总数（跨组计数，不去重）。 */
+  microPhaseCount?: number;
 }
 
 export interface FaciesColorsResult extends ApiResult {
@@ -112,20 +122,26 @@ export const heartbeatAnnotation = (
     }).then((r) => r.json()),
   );
 
-/** 获取全局沉积微相规则（按导入顺序）。 */
+/** 获取全局亚相→微相规则组（按导入列序）。 */
 export const fetchMicroPhaseRules = (): Promise<MicroPhaseRulesResult> =>
   safe(
     apiFetch('/api/annotation/micro-phase-rules').then(async (r) => {
       const data = (await r.json()) as MicroPhaseRulesResult;
       if (!r.ok && data.ok !== false) {
-        return { ok: false, error: data.error || `HTTP ${r.status}`, names: data.names };
+        return {
+          ok: false,
+          error: data.error || `HTTP ${r.status}`,
+          groups: data.groups,
+          subPhaseCount: data.subPhaseCount,
+          microPhaseCount: data.microPhaseCount,
+        };
       }
       return data;
     }),
   );
 
 /**
- * 上传单井标注规则 XLSX；服务端解析并原子替换。
+ * 上传列式规则 XLSX；服务端解析并原子替换为 [{ subPhase, microPhases[] }]。
  * 仅接受 .xlsx；失败时 error 为服务端信息。
  */
 export const importMicroPhaseRules = (file: File): Promise<MicroPhaseRulesResult> => {
@@ -140,7 +156,13 @@ export const importMicroPhaseRules = (file: File): Promise<MicroPhaseRulesResult
     }).then(async (r) => {
       const data = (await r.json()) as MicroPhaseRulesResult;
       if (!r.ok && data.ok !== false) {
-        return { ok: false, error: data.error || `HTTP ${r.status}`, names: data.names };
+        return {
+          ok: false,
+          error: data.error || `HTTP ${r.status}`,
+          groups: data.groups,
+          subPhaseCount: data.subPhaseCount,
+          microPhaseCount: data.microPhaseCount,
+        };
       }
       return data;
     }),

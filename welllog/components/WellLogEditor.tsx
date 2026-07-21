@@ -38,6 +38,7 @@ import {
   resolveFaciesColors,
   saveAnnotationIntervals,
   type IntervalOpPayload,
+  type MicroPhaseRuleGroup,
 } from '../../services/annotation';
 
 /** 单次 save 选项；auto 失败文案由 autosaveRound 统一处理。 */
@@ -71,8 +72,8 @@ interface Props {
   name: string;
   /** 锁失效后：保留显示但禁用新增/保存 */
   readOnly?: boolean;
-  /** 导入的沉积微相规则（优先作为名称候选） */
-  microPhaseRules?: string[];
+  /** 亚相→微相规则组；弹窗按区间中心深度定向推荐微相 */
+  microPhaseRuleGroups?: MicroPhaseRuleGroup[];
   onPendingChange?: (count: number) => void;
   onSaveStateChange?: (saving: boolean) => void;
 }
@@ -148,7 +149,7 @@ function toPayload(ops: IntervalOperation[]): IntervalOpPayload[] {
 }
 
 const WellLogEditor = forwardRef<WellLogEditorHandle, Props>(function WellLogEditor(
-  { fileId, name, readOnly = false, microPhaseRules, onPendingChange, onSaveStateChange },
+  { fileId, name, readOnly = false, microPhaseRuleGroups, onPendingChange, onSaveStateChange },
   ref,
 ) {
   const { data: loaded, loading, error } = useWellLogData(fileId, name);
@@ -318,6 +319,16 @@ const WellLogEditor = forwardRef<WellLogEditorHandle, Props>(function WellLogEdi
     (kind: IntervalKind) => (data ? existingForKind(data, kind) : []),
     [data],
   );
+
+  /** 本井亚相区间：供微相编辑按中心深度定向推荐。 */
+  const subPhaseIntervals = useMemo((): IntervalItem[] => {
+    if (!data) return [];
+    return (
+      data.intervals?.facies?.subPhase ??
+      data.facies?.subPhase ??
+      []
+    );
+  }, [data]);
 
   const onIntervalSelect = useCallback(
     (top: number, bottom: number) => {
@@ -886,7 +897,8 @@ const WellLogEditor = forwardRef<WellLogEditorHandle, Props>(function WellLogEdi
           wellTop={data.topDepth}
           wellBottom={data.bottomDepth}
           getExisting={getExisting}
-          microPhaseRules={microPhaseRules}
+          microPhaseRuleGroups={microPhaseRuleGroups}
+          subPhaseIntervals={subPhaseIntervals}
           onConfirm={confirmInterval}
           onCancel={() => setDialog(null)}
         />
@@ -898,7 +910,8 @@ const WellLogEditor = forwardRef<WellLogEditorHandle, Props>(function WellLogEdi
           wellTop={data.topDepth}
           wellBottom={data.bottomDepth}
           getOtherExisting={getOtherExisting}
-          microPhaseRules={microPhaseRules}
+          microPhaseRuleGroups={microPhaseRuleGroups}
+          subPhaseIntervals={subPhaseIntervals}
           onConfirm={confirmBlockEdit}
           onDelete={deleteBlock}
           onCancel={cancelBlockEdit}

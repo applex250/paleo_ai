@@ -1,8 +1,13 @@
 // 已有岩性/沉积微相块的右键双击编辑弹窗：固定类型，支持直接删除。
+// 微相名称候选：名称为空按中心深度唯一亚相推荐；输入任意字符后全局搜索全部导入微相；岩性仍为井内已有名。
 import React, { useEffect, useMemo, useState } from 'react';
 import type { IntervalItem } from '../types';
 import type { IntervalKind } from '../intervalEdits';
 import { collectExistingNames, normalizeDepthRange, resolveCreateIntervals } from '../intervalEdits';
+import {
+  recommendMicroPhasesFromInput,
+  type MicroPhaseRuleGroup,
+} from '../microPhaseRecommendations';
 import type { IntervalEditResult } from './IntervalEditDialog';
 
 interface Target extends IntervalItem {
@@ -15,7 +20,10 @@ interface Props {
   wellBottom: number;
   /** 已排除 target 本身，用于验证修改后的边界与同名融合。 */
   getOtherExisting: (kind: IntervalKind) => IntervalItem[];
-  microPhaseRules?: string[];
+  /** 亚相→微相规则组；仅 microPhase 时供空名亚相推荐 / 非空名全局搜索 */
+  microPhaseRuleGroups?: MicroPhaseRuleGroup[];
+  /** 本井亚相区间；名称空时参与定向推荐 */
+  subPhaseIntervals?: IntervalItem[];
   onConfirm: (result: IntervalEditResult) => void;
   onDelete: () => void;
   onCancel: () => void;
@@ -26,32 +34,13 @@ const KIND_LABEL: Record<IntervalKind, string> = {
   microPhase: '沉积微相',
 };
 
-function suggestionNames(rules: readonly string[] | undefined, existing: readonly string[]): string[] {
-  const names: string[] = [];
-  const seen = new Set<string>();
-  for (const raw of rules ?? []) {
-    const name = raw.trim();
-    if (name && !seen.has(name)) {
-      seen.add(name);
-      names.push(name);
-    }
-  }
-  for (const raw of existing) {
-    const name = raw.trim();
-    if (name && !seen.has(name)) {
-      seen.add(name);
-      names.push(name);
-    }
-  }
-  return names;
-}
-
 const IntervalBlockEditDialog: React.FC<Props> = ({
   target,
   wellTop,
   wellBottom,
   getOtherExisting,
-  microPhaseRules,
+  microPhaseRuleGroups,
+  subPhaseIntervals,
   onConfirm,
   onDelete,
   onCancel,
@@ -72,10 +61,24 @@ const IntervalBlockEditDialog: React.FC<Props> = ({
     () => getOtherExisting(target.kind),
     [getOtherExisting, target.kind],
   );
+
+  // 岩性：井内已有名；微相：空名→唯一亚相组，非空→全部导入微相包含过滤（可手输）
   const names = useMemo(() => {
-    const current = collectExistingNames(existing);
-    return target.kind === 'microPhase' ? suggestionNames(microPhaseRules, current) : current;
-  }, [existing, microPhaseRules, target.kind]);
+    if (target.kind === 'lithology') {
+      return collectExistingNames(existing);
+    }
+    if (target.kind === 'microPhase') {
+      return recommendMicroPhasesFromInput(
+        topStr,
+        bottomStr,
+        subPhaseIntervals ?? [],
+        microPhaseRuleGroups ?? [],
+        name,
+      );
+    }
+    return [];
+  }, [existing, microPhaseRuleGroups, name, subPhaseIntervals, target.kind, topStr, bottomStr]);
+
   const datalistId = `interval-block-${target.kind}-names`;
 
   const submit = (): void => {
@@ -133,6 +136,11 @@ const IntervalBlockEditDialog: React.FC<Props> = ({
               list={datalistId}
               value={name}
               onChange={(e) => setName(e.target.value)}
+              placeholder={
+                target.kind === 'microPhase'
+                  ? '空=按亚相推荐；输入则搜索全部微相'
+                  : undefined
+              }
               className="mt-1 w-full px-3 py-2 border border-slate-300 rounded-lg text-sm select-text"
               autoFocus
             />
@@ -168,6 +176,9 @@ const IntervalBlockEditDialog: React.FC<Props> = ({
         )}
         <p className="mt-3 text-xs text-slate-400">
           修改和删除均仅加入 JSON 增量操作，不会上传完整 XLSX。范围内不同名块将保留，仅填充空白段。
+          {target.kind === 'microPhase'
+            ? ' 微相：名称为空时按区间中心唯一亚相推荐；输入任意字符后搜索全部导入微相（可手输）。'
+            : ''}
         </p>
         <div className="mt-5 flex items-center gap-2">
           <button

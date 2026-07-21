@@ -2,7 +2,7 @@
 // 状态机铁律：1↔2 由锁驱动（持锁=2，失锁=1）；0 不可逆；3 由 finish 产生。
 // 所有写操作（含巡检）走 enqueue 串行化，状态与锁在同一 enqueue 任务内变更。
 // 区间增量：POST /:id/intervals → 持锁队列内 Worker 读写 <id>.xlsx（JSON-only，幂等）。
-// 沉积微相规则：GET/POST /micro-phase-rules（全局列表，成功导入原子替换）。
+// 亚相→微相规则：GET/POST /micro-phase-rules（有序 rule groups，成功导入原子替换）。
 // 相颜色：POST /facies-colors（批量确保注册并返回名称→HEX；登录保护）。
 import fs from 'node:fs';
 import path from 'node:path';
@@ -11,10 +11,12 @@ import * as XLSX from 'xlsx';
 import {
   db,
   STATUS_LABEL,
-  listMicroPhaseRules,
-  replaceMicroPhaseRules,
+  listMicroPhaseRuleGroups,
+  replaceMicroPhaseRuleGroups,
+  countMicroPhaseRuleStats,
   ensureFaciesColors,
   normalizeFaciesName,
+  type MicroPhaseRuleGroup,
 } from './db';
 import { DATA_DIR } from './util';
 import { enqueue } from './queue';
@@ -157,15 +159,16 @@ const lockErr = (state: LockState): RouteResult | null => {
 const fail = (code: number, error: string): RouteResult => ({ ok: false, code, error });
 
 /**
- * 解析单井标注规则 XLSX：
+ * 解析亚相列式规则 XLSX：
  * - 仅第一个工作表
- * - A1 修剪后必须严格等于「沉积微相」
- * - 只读第一列 A2 起；字符串化、trim、跳过空值、按首次出现保序去重
- * - 至少保留一项
+ * - 每一列：第 1 行 = 亚相（subPhase），第 2 行起 = 该亚相微相（microPhases）
+ * - 全空列忽略；有亚相名但无微相 → 拒绝；有微相但无亚相名 → 拒绝
+ * - trim + Unicode NFC；组内保序去重；跨组允许同名
+ * - 至少一组有效列
  */
 export function parseMicroPhaseRulesXlsx(
   buf: Buffer,
-): { ok: true; names: string[] } | { ok: false; error: string } {
+): { ok: true; groups: MicroPhaseRuleGroup[] } | { ok: false; error: string } {
   if (!Buffer.isBuffer(buf) || buf.length === 0) {
     return { ok: false, error: '空请求体或无效内容' };
   }
@@ -188,24 +191,48 @@ export function parseMicroPhaseRulesXlsx(
     defval: '',
     raw: false,
   }) as unknown[][];
-  const a1 = rows.length > 0 ? String(rows[0]?.[0] ?? '').trim() : '';
-  if (a1 !== '沉积微相') {
-    return { ok: false, error: '表头 A1 必须为「沉积微相」' };
+
+  let maxCols = 0;
+  for (const row of rows) {
+    if (Array.isArray(row) && row.length > maxCols) maxCols = row.length;
   }
-  const names: string[] = [];
-  const seen = new Set<string>();
-  for (let i = 1; i < rows.length; i++) {
-    // 仅第一列；忽略其他列
-    const cell = rows[i]?.[0];
-    const s = cell == null || cell === '' ? '' : String(cell).trim();
-    if (!s || seen.has(s)) continue;
-    seen.add(s);
-    names.push(s);
+
+  const groups: MicroPhaseRuleGroup[] = [];
+  for (let col = 0; col < maxCols; col++) {
+    const rawSub = rows.length > 0 ? rows[0]?.[col] : undefined;
+    const subPhase = normalizeFaciesName(
+      rawSub == null || rawSub === '' ? '' : String(rawSub),
+    );
+    const microPhases: string[] = [];
+    const seen = new Set<string>();
+    for (let r = 1; r < rows.length; r++) {
+      const cell = rows[r]?.[col];
+      const m = normalizeFaciesName(cell == null || cell === '' ? '' : String(cell));
+      if (!m || seen.has(m)) continue;
+      seen.add(m);
+      microPhases.push(m);
+    }
+    // 全空列：忽略
+    if (!subPhase && microPhases.length === 0) continue;
+    if (!subPhase) {
+      return {
+        ok: false,
+        error: `第 ${col + 1} 列有微相但缺少亚相名称`,
+      };
+    }
+    if (microPhases.length === 0) {
+      return {
+        ok: false,
+        error: `亚相「${subPhase}」列没有任何微相名称`,
+      };
+    }
+    groups.push({ subPhase, microPhases });
   }
-  if (names.length === 0) {
-    return { ok: false, error: '沉积微相名称列表为空，至少需要一项' };
+
+  if (groups.length === 0) {
+    return { ok: false, error: '规则表为空：至少需要一列有效亚相及其微相' };
   }
-  return { ok: true, names };
+  return { ok: true, groups };
 }
 
 const FACIES_COLORS_MAX_NAMES = 2000;
@@ -259,18 +286,24 @@ export const annotationRouter = (): Router => {
   const jsonBody = express.json();
   const jsonBodyBig = express.json({ limit: '200mb' });
 
-  // GET /api/annotation/micro-phase-rules —— 按导入顺序返回全局沉积微相规则
+  // GET /api/annotation/micro-phase-rules —— 有序 [{ subPhase, microPhases[] }]
   r.get('/micro-phase-rules', (_req: Request, res: Response) => {
     try {
-      const names = listMicroPhaseRules();
-      return res.json({ ok: true, names });
+      const groups = listMicroPhaseRuleGroups();
+      const stats = countMicroPhaseRuleStats(groups);
+      return res.json({
+        ok: true,
+        groups,
+        subPhaseCount: stats.subPhaseCount,
+        microPhaseCount: stats.microPhaseCount,
+      });
     } catch (e) {
       return res.status(500).json({ ok: false, error: String(e) });
     }
   });
 
   // POST /api/annotation/micro-phase-rules?filename=xxx.xlsx body=原始字节
-  // 解析后原子替换历史规则并持久化（同事务内先注册颜色）
+  // 列式规则：解析后原子替换历史规则并持久化（同事务内为每条微相注册颜色）
   r.post('/micro-phase-rules', rawBody, (req: Request, res: Response) => {
     const filename = String((req.query.filename as string | undefined) ?? '');
     if (!/\.xlsx$/i.test(filename)) {
@@ -282,8 +315,14 @@ export const annotationRouter = (): Router => {
       return res.status(400).json({ ok: false, error: parsed.error });
     }
     try {
-      replaceMicroPhaseRules(parsed.names);
-      return res.json({ ok: true, names: parsed.names, count: parsed.names.length });
+      replaceMicroPhaseRuleGroups(parsed.groups);
+      const stats = countMicroPhaseRuleStats(parsed.groups);
+      return res.json({
+        ok: true,
+        groups: parsed.groups,
+        subPhaseCount: stats.subPhaseCount,
+        microPhaseCount: stats.microPhaseCount,
+      });
     } catch (e) {
       return res.status(500).json({ ok: false, error: String(e) });
     }

@@ -22,6 +22,7 @@ import {
   exitAnnotation,
   fetchMicroPhaseRules,
   importMicroPhaseRules,
+  type MicroPhaseRuleGroup,
 } from '../services/annotation';
 import { useActivityTracker } from '../hooks/useActivityTracker';
 import { useAnnotationLock } from '../hooks/useAnnotationLock';
@@ -55,8 +56,10 @@ const Annotation: React.FC = () => {
   const [exitDialog, setExitDialog] = useState<ExitDialogMode>(null);
   // 折叠组：默认全部折叠；key = 项目名，true=折叠
   const [collapsedProjects, setCollapsedProjects] = useState<Record<string, boolean>>({});
-  // 全局沉积微相规则（导入顺序）；传给编辑器作为 microPhase 名称候选
-  const [microPhaseRules, setMicroPhaseRules] = useState<string[]>([]);
+  // 全局亚相→微相规则组（列序）；传给编辑器作深度定向微相推荐
+  const [microPhaseRuleGroups, setMicroPhaseRuleGroups] = useState<MicroPhaseRuleGroup[]>([]);
+  const [ruleSubPhaseCount, setRuleSubPhaseCount] = useState(0);
+  const [ruleMicroPhaseCount, setRuleMicroPhaseCount] = useState(0);
   const [importingRules, setImportingRules] = useState(false);
   const rulesFileInputRef = useRef<HTMLInputElement>(null);
 
@@ -79,12 +82,30 @@ const Annotation: React.FC = () => {
     }
   }, []);
 
+  const applyRuleGroups = useCallback((groups: MicroPhaseRuleGroup[] | undefined, subCount?: number, microCount?: number) => {
+    const list = Array.isArray(groups) ? groups : [];
+    setMicroPhaseRuleGroups(list);
+    const sub =
+      typeof subCount === 'number' && Number.isFinite(subCount)
+        ? subCount
+        : list.length;
+    let micro =
+      typeof microCount === 'number' && Number.isFinite(microCount)
+        ? microCount
+        : 0;
+    if (typeof microCount !== 'number' || !Number.isFinite(microCount)) {
+      for (const g of list) micro += g.microPhases?.length ?? 0;
+    }
+    setRuleSubPhaseCount(sub);
+    setRuleMicroPhaseCount(micro);
+  }, []);
+
   const loadMicroPhaseRules = useCallback(async () => {
     const res = await fetchMicroPhaseRules();
-    if (res.ok && Array.isArray(res.names)) {
-      setMicroPhaseRules(res.names);
+    if (res.ok && Array.isArray(res.groups)) {
+      applyRuleGroups(res.groups, res.subPhaseCount, res.microPhaseCount);
     }
-  }, []);
+  }, [applyRuleGroups]);
 
   useEffect(() => {
     fetchFiles();
@@ -265,7 +286,7 @@ const Annotation: React.FC = () => {
     }
   };
 
-  // 单井标注规则导入：仅 .xlsx → 服务端解析并原子替换 → 立即刷新候选
+  // 单井标注规则导入：列式 .xlsx（首行亚相，第二行起为该列微相）→ 服务端原子替换 → 刷新规则组
   const handleRulesFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
@@ -281,11 +302,18 @@ const Annotation: React.FC = () => {
         flash({ type: 'error', text: res.error || '规则导入失败' });
         return;
       }
-      const names = Array.isArray(res.names) ? res.names : [];
-      setMicroPhaseRules(names);
+      const groups = Array.isArray(res.groups) ? res.groups : [];
+      applyRuleGroups(groups, res.subPhaseCount, res.microPhaseCount);
+      const subN =
+        typeof res.subPhaseCount === 'number' ? res.subPhaseCount : groups.length;
+      let microN =
+        typeof res.microPhaseCount === 'number' ? res.microPhaseCount : 0;
+      if (typeof res.microPhaseCount !== 'number') {
+        for (const g of groups) microN += g.microPhases?.length ?? 0;
+      }
       flash({
         type: 'success',
-        text: `已导入 ${names.length || res.count || 0} 条沉积微相规则`,
+        text: `已导入 ${subN} 个亚相、${microN} 条微相规则`,
       });
     } finally {
       setImportingRules(false);
@@ -337,7 +365,7 @@ const Annotation: React.FC = () => {
               fileId={editing.id}
               name={editing.name}
               readOnly={lock.readOnly}
-              microPhaseRules={microPhaseRules}
+              microPhaseRuleGroups={microPhaseRuleGroups}
               onPendingChange={setPendingCount}
               onSaveStateChange={setSaving}
             />
@@ -501,7 +529,7 @@ const Annotation: React.FC = () => {
               disabled={importingRules}
               onClick={() => rulesFileInputRef.current?.click()}
               className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-blue-700 bg-blue-50 border border-blue-200 hover:bg-blue-100 disabled:opacity-50"
-              title="上传 .xlsx：A1 为「沉积微相」，A2 起第一列为名称"
+              title="上传 .xlsx：首个工作表每列第 1 行=亚相，第 2 行起=该亚相微相"
             >
               {importingRules ? (
                 <Loader2 size={14} className="animate-spin" />
@@ -521,9 +549,12 @@ const Annotation: React.FC = () => {
           </div>
           <p className="text-xs text-slate-500 mt-1">
             共 {files.length} 个数据集
-            {microPhaseRules.length > 0
-              ? ` · 已加载 ${microPhaseRules.length} 条沉积微相规则`
+            {ruleSubPhaseCount > 0 || ruleMicroPhaseCount > 0
+              ? ` · 已加载 ${ruleSubPhaseCount} 个亚相、${ruleMicroPhaseCount} 条微相规则`
               : ''}
+          </p>
+          <p className="text-xs text-slate-400 mt-0.5">
+            规则表：首个工作表按列导入；每列第 1 行亚相名，第 2 行起为该亚相微相。编辑微相时按区间中心深度所在亚相推荐。
           </p>
         </div>
 

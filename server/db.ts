@@ -62,11 +62,19 @@ db.exec(`
   );
 `);
 
-// 全局沉积微相标注规则（导入顺序由 sort_order 保证；成功导入时整体替换）
+// 全局亚相→微相规则组（列序 = group sort_order；组内微相序 = micro sort_order；成功导入时整体替换）
 db.exec(`
-  CREATE TABLE IF NOT EXISTS annotation_micro_phase_rules (
+  CREATE TABLE IF NOT EXISTS annotation_subphase_rule_groups (
     sort_order INTEGER NOT NULL PRIMARY KEY,
-    name       TEXT NOT NULL
+    sub_phase  TEXT NOT NULL
+  );
+`);
+db.exec(`
+  CREATE TABLE IF NOT EXISTS annotation_subphase_rule_microphases (
+    group_order INTEGER NOT NULL,
+    sort_order  INTEGER NOT NULL,
+    name        TEXT NOT NULL,
+    PRIMARY KEY (group_order, sort_order)
   );
 `);
 
@@ -81,6 +89,45 @@ db.exec(`
     seq  INTEGER NOT NULL UNIQUE
   );
 `);
+
+/**
+ * 一次性迁移：丢弃旧版「扁平微相名列表」规则表。
+ * 旧规则无亚相归属，不得进入推荐路径；新库仅使用 [{ subPhase, microPhases[] }] 结构。
+ */
+const migrateFlatMicroPhaseRulesAway = (): void => {
+  const legacy = db
+    .prepare(
+      `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'annotation_micro_phase_rules'`,
+    )
+    .get() as { name?: string } | undefined;
+  if (!legacy?.name) return;
+
+  const cols = db.prepare(`PRAGMA table_info(annotation_micro_phase_rules)`).all() as Array<{
+    name: string;
+  }>;
+  const colNames = new Set(cols.map((c) => c.name));
+  // 旧扁平表：sort_order + name，无 sub_phase
+  const isFlat = colNames.has('name') && !colNames.has('sub_phase');
+  if (!isFlat) {
+    // 未知/中间形态：仍丢弃，避免无关联名进入推荐
+    db.exec(`DROP TABLE IF EXISTS annotation_micro_phase_rules`);
+    console.log('[db] 已移除非分组形态的 annotation_micro_phase_rules 表');
+    return;
+  }
+  const row = db.prepare(`SELECT COUNT(*) AS c FROM annotation_micro_phase_rules`).get() as {
+    c: number;
+  };
+  const n = row?.c ?? 0;
+  db.exec(`DROP TABLE IF EXISTS annotation_micro_phase_rules`);
+  if (n > 0) {
+    console.log(
+      `[db] 已丢弃 ${n} 条无亚相关联的旧沉积微相规则（不用于推荐；请重新导入列式规则 XLSX）`,
+    );
+  } else {
+    console.log('[db] 已移除空的旧扁平 annotation_micro_phase_rules 表');
+  }
+};
+migrateFlatMicroPhaseRulesAway();
 
 // 一次性迁移：把旧表（status TEXT '原始'）重建为新结构（status INTEGER + 锁字段）
 const migrateDatasetSchema = (): void => {
@@ -273,14 +320,50 @@ if (migratedCount > 0) {
   console.log(`[db] 已把 danjing 现有 ${migratedCount} 个 xlsx 登记进 SQLite 并改名为 <id>.xlsx`);
 }
 
-/** 按导入顺序返回全局沉积微相规则名称。 */
-export const listMicroPhaseRules = (): string[] => {
-  const rows = db
+/** 亚相规则组：一列亚相 → 其下有序微相列表。 */
+export interface MicroPhaseRuleGroup {
+  subPhase: string;
+  microPhases: string[];
+}
+
+/** 统计规则组的亚相数与微相总数（跨组计数，不去重）。 */
+export function countMicroPhaseRuleStats(groups: MicroPhaseRuleGroup[]): {
+  subPhaseCount: number;
+  microPhaseCount: number;
+} {
+  let microPhaseCount = 0;
+  for (const g of groups) {
+    microPhaseCount += g.microPhases?.length ?? 0;
+  }
+  return { subPhaseCount: groups.length, microPhaseCount };
+}
+
+/**
+ * 按导入列序返回全局亚相→微相规则组。
+ * 空库返回 []（旧扁平规则已迁移丢弃，不会出现无关联推荐名）。
+ */
+export const listMicroPhaseRuleGroups = (): MicroPhaseRuleGroup[] => {
+  const groupRows = db
     .prepare(
-      `SELECT name FROM annotation_micro_phase_rules ORDER BY sort_order ASC`,
+      `SELECT sort_order AS sortOrder, sub_phase AS subPhase
+       FROM annotation_subphase_rule_groups
+       ORDER BY sort_order ASC`,
     )
-    .all() as Array<{ name: string }>;
-  return rows.map((r) => r.name);
+    .all() as Array<{ sortOrder: number; subPhase: string }>;
+  if (groupRows.length === 0) return [];
+
+  const microStmt = db.prepare(
+    `SELECT name FROM annotation_subphase_rule_microphases
+     WHERE group_order = ?
+     ORDER BY sort_order ASC`,
+  );
+  return groupRows.map((g) => {
+    const micros = microStmt.all(g.sortOrder) as Array<{ name: string }>;
+    return {
+      subPhase: g.subPhase,
+      microPhases: micros.map((m) => m.name),
+    };
+  });
 };
 
 // ---------------------------------------------------------------------------
@@ -441,26 +524,59 @@ export const lookupFaciesColors = (names: string[]): Record<string, string> => {
 };
 
 /**
- * 原子替换全局沉积微相规则。
- * names 须已去重、保序、非空；调用方负责校验。
- * 同一事务内先为每条名称注册颜色，再替换规则列表。
+ * 原子替换全局亚相→微相规则组。
+ * groups 须非空；每组 subPhase 非空、microPhases 至少一项（调用方/解析器负责规范化）。
+ * 同一事务内先为每条微相名称注册颜色，再整体替换两组表。
  */
-export const replaceMicroPhaseRules = (names: string[]): void => {
-  if (names.length === 0) {
-    throw new Error('沉积微相规则至少需要一项');
+export const replaceMicroPhaseRuleGroups = (groups: MicroPhaseRuleGroup[]): void => {
+  if (!Array.isArray(groups) || groups.length === 0) {
+    throw new Error('亚相规则至少需要一组');
   }
-  const del = db.prepare(`DELETE FROM annotation_micro_phase_rules`);
-  const ins = db.prepare(
-    `INSERT INTO annotation_micro_phase_rules (sort_order, name) VALUES (?, ?)`,
-  );
-  tx(() => {
-    for (const raw of names) {
-      const n = normalizeFaciesName(raw);
-      if (n) ensureFaciesColorInTx(n);
+  const normalized: MicroPhaseRuleGroup[] = [];
+  for (let i = 0; i < groups.length; i++) {
+    const g = groups[i];
+    const subPhase = normalizeFaciesName(g?.subPhase ?? '');
+    if (!subPhase) {
+      throw new Error(`groups[${i}].subPhase 不能为空`);
     }
-    del.run();
-    for (let i = 0; i < names.length; i++) {
-      ins.run(i, names[i]);
+    const microPhases: string[] = [];
+    const seen = new Set<string>();
+    const rawMicros = Array.isArray(g?.microPhases) ? g.microPhases : [];
+    for (const raw of rawMicros) {
+      const m = normalizeFaciesName(String(raw ?? ''));
+      if (!m || seen.has(m)) continue;
+      seen.add(m);
+      microPhases.push(m);
+    }
+    if (microPhases.length === 0) {
+      throw new Error(`亚相「${subPhase}」至少需要一项微相`);
+    }
+    normalized.push({ subPhase, microPhases });
+  }
+
+  const delMicro = db.prepare(`DELETE FROM annotation_subphase_rule_microphases`);
+  const delGroup = db.prepare(`DELETE FROM annotation_subphase_rule_groups`);
+  const insGroup = db.prepare(
+    `INSERT INTO annotation_subphase_rule_groups (sort_order, sub_phase) VALUES (?, ?)`,
+  );
+  const insMicro = db.prepare(
+    `INSERT INTO annotation_subphase_rule_microphases (group_order, sort_order, name) VALUES (?, ?, ?)`,
+  );
+
+  tx(() => {
+    for (const g of normalized) {
+      for (const m of g.microPhases) {
+        ensureFaciesColorInTx(m);
+      }
+    }
+    delMicro.run();
+    delGroup.run();
+    for (let i = 0; i < normalized.length; i++) {
+      const g = normalized[i];
+      insGroup.run(i, g.subPhase);
+      for (let j = 0; j < g.microPhases.length; j++) {
+        insMicro.run(i, j, g.microPhases[j]);
+      }
     }
   });
 };

@@ -1,13 +1,14 @@
-// 井剖面 SVG 画布：固定左列深度尺 + 内容区固定列宽/横向滚动 + 深度滚轮缩放/平移/十字光标。
+// 井剖面 SVG 画布：固定左列深度尺 + 曲线层（左）+ 右侧六列固定层。
 //
-// ⚡ 深度尺剥离出横向滚动区，固定左侧常驻（对齐 GeoViz DepthRuler）；与内容区共享几何 → 纵向对齐。
-// ⚡ 内容区 GeoViz 横向规则：effectiveWidth=max(naturalWidth, viewport)，scale≥1 只拉伸不压缩；超出横向滚动。
-// ⚡ activeTracks 空 / naturalWidth≤0 → 内容区空态占位（不除零）。
-// ⚡ 十字光标：水平线在内容区，深度读数徽标在固定深度列（滚动时常驻）。
-// ⚡ range 受控（由 WellLogViewer 持有）；滚轮用 getScreenCTM().inverse() 反算本地 Y → depth；RAF 合并。
-// ⚡ 滚轮优先级：Shift 横移 scrollLeft → Ctrl 缩放 → 普通纵移 range；无左键拖拽纵移。
-// ⚡ 区间编辑模式：左键仅在图体区域框选深度（>4px 触发回调）；关闭时左键不改变视图。
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+// ⚡ 深度尺固定左侧；组、段、岩性、微相/亚相/相固定右侧；其余轨道在曲线层。
+// ⚡ 双层自动拉伸：scale≥1 仅放大不压缩；曲线层 SVG=max(可用宽,逻辑总宽)，超出则横向滚动。
+// ⚡ 固定层占用宽≥逻辑总宽（分界下限同）；分配更大时向左等比拉伸。列头/分界拖拽行为见下。
+// ⚡ 列头右边界 col-resize 拖拽改当前列逻辑宽；固定层最左边界为唯一层间分界手柄。
+// ⚡ 列头拖拽不触发十字线/框选/曲线菜单；滚轮导航、Ctrl 深度缩放、Shift 横移、区间框选、右键双击编辑不变。
+// ⚡ activeTracks 全空 → 中间空态占位（不除零）。
+// ⚡ 十字光标：水平线在曲线层+固定层内容区，深度读数徽标在固定深度列。
+// ⚡ range 受控；滚轮用 getScreenCTM().inverse() 反算本地 Y → depth；RAF 合并。
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MIN_DEPTH_SPAN, THEME, TRACK_WIDTH } from '../config';
 import { hasTrackData } from '../transform';
 import type { AnyTrackConfig, WellLogData } from '../types';
@@ -44,6 +45,104 @@ interface Props {
 
 const DEPTH_CFG = { type: 'depth' as const, width: TRACK_WIDTH.depth, label: '深度', label2: '(m)' };
 
+/** 列头右边界 / 层间分界拖拽热区半宽（px）。 */
+const COL_RESIZE_HANDLE_PX = 5;
+/** 曲线层至少保留的可用像素，避免固定层拖满后曲线层塌缩。 */
+const MIN_SCROLL_PANE_PX = 40;
+
+/** 右侧固定轨道：组 / 段 / 岩性 / 微相 / 亚相 / 相。 */
+function isRightFixedTrack(cfg: AnyTrackConfig): boolean {
+  if (cfg.type !== 'interval') return false;
+  if (cfg.dataKey === 'formation' || cfg.dataKey === 'member' || cfg.dataKey === 'lithology') {
+    return true;
+  }
+  if (cfg.dataKey === 'facies') {
+    const lv = cfg.faciesLevel;
+    return lv === 'microPhase' || lv === 'subPhase' || lv === 'phase';
+  }
+  return false;
+}
+
+/** 轨道稳定键（会话内逻辑列宽 Map 用；不改数据保存接口）。 */
+function trackKey(cfg: AnyTrackConfig): string {
+  if (cfg.type === 'curves') {
+    return `curves:${cfg.curveNames[0] ?? cfg.label}`;
+  }
+  if (cfg.type === 'interval') {
+    return `interval:${cfg.dataKey}:${cfg.faciesLevel ?? ''}:${cfg.label}`;
+  }
+  if (cfg.type === 'text') {
+    return `text:${'dataKey' in cfg ? cfg.dataKey : ''}:${cfg.label}`;
+  }
+  if (cfg.type === 'systems_tract') {
+    return `systems_tract:${cfg.label}`;
+  }
+  return `${cfg.type}:${cfg.label}`;
+}
+
+/** 配置宽度即逻辑最小宽度。 */
+function minLogicalWidth(cfg: AnyTrackConfig): number {
+  return cfg.width;
+}
+
+type LayoutItem = { cfg: AnyTrackConfig; x: number; width: number; key: string };
+type PaneLayout = {
+  items: LayoutItem[];
+  naturalWidth: number;
+  effectiveWidth: number;
+  /** display = logical * scale；拖拽时 dLogical = dDisplay / scale */
+  scale: number;
+};
+
+/**
+ * 按逻辑宽度比例自动拉伸填满 availableW（仅放大、不压缩）。
+ * naturalWidth = 逻辑宽之和；effectiveWidth = max(availableW, natural)；
+ * scale = effective/natural ≥ 1（natural=0 时为 1）。逻辑总宽超出可用宽时 SVG 更宽，由滚动容器产生横向滚动。
+ */
+function buildStretchedLayout(
+  tracks: AnyTrackConfig[],
+  logicalByKey: Record<string, number>,
+  availableW: number,
+): PaneLayout {
+  const keys = tracks.map(trackKey);
+  const logicals = tracks.map((cfg, i) => {
+    const min = minLogicalWidth(cfg);
+    const stored = logicalByKey[keys[i]];
+    return stored != null ? Math.max(min, stored) : min;
+  });
+  const naturalWidth = logicals.reduce((s, w) => s + w, 0);
+  // 不得压缩到逻辑宽以下：scale 下限 1；超出可用宽时 effective 取逻辑总宽
+  const effectiveWidth = Math.max(Math.max(0, availableW), naturalWidth);
+  const scale = naturalWidth > 0 ? effectiveWidth / naturalWidth : 1;
+  let x = 0;
+  const items = tracks.map((cfg, i) => {
+    const w = logicals[i] * scale;
+    const sx = x;
+    x += w;
+    return { cfg, x: sx, width: w, key: keys[i] };
+  });
+  return { items, naturalWidth, effectiveWidth, scale };
+}
+
+function buildGroups(items: LayoutItem[]): { label: string; x: number; width: number }[] {
+  const out: { label: string; x: number; width: number }[] = [];
+  let i = 0;
+  while (i < items.length) {
+    const g = items[i].cfg.group;
+    if (!g) {
+      i++;
+      continue;
+    }
+    let j = i;
+    while (j < items.length && items[j].cfg.group === g) j++;
+    const first = items[i];
+    const last = items[j - 1];
+    out.push({ label: g, x: first.x, width: last.x + last.width - first.x });
+    i = j;
+  }
+  return out;
+}
+
 function clientToSvgY(svg: SVGSVGElement, clientY: number): number | null {
   const m = svg.getScreenCTM();
   if (!m) return null;
@@ -69,6 +168,25 @@ function renderTrack(p: TrackProps): React.ReactElement | null {
   }
 }
 
+type ColResizeSession = {
+  kind: 'col';
+  key: string;
+  minW: number;
+  startClientX: number;
+  startLogical: number;
+  scale: number;
+};
+
+type DividerResizeSession = {
+  kind: 'divider';
+  startClientX: number;
+  startFixedW: number;
+  minFixedW: number;
+  maxFixedW: number;
+};
+
+type ResizeSession = ColResizeSession | DividerResizeSession;
+
 const WellLogCanvas: React.FC<Props> = ({
   data,
   tracks,
@@ -83,16 +201,24 @@ const WellLogCanvas: React.FC<Props> = ({
   onIntervalBlockRightDoubleClick,
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const interactionRef = useRef<HTMLDivElement>(null);
   const contentSvgRef = useRef<SVGSVGElement>(null);
+  const fixedSvgRef = useRef<SVGSVGElement>(null);
   const [size, setSize] = useState({ w: 800, h: 600 });
   const [cursorY, setCursorY] = useState<number | null>(null);
-  // 区间框选：记录 SVG 本地 Y（仅 content 区）；endY 同步写 ref，避免 pointerup 读到过期 state
+  // 区间框选：记录 SVG 本地 Y；endY 同步写 ref，避免 pointerup 读到过期 state
   const selectRef = useRef<{ startY: number; endY: number; pointerId: number } | null>(null);
   const [selectBand, setSelectBand] = useState<{ y0: number; y1: number } | null>(null);
 
-  // 量滚动容器视口宽 + 行高
+  // 会话级列宽：逻辑宽 Map + 固定层总占用（null=按配置最小宽之和）
+  const [logicalWidths, setLogicalWidths] = useState<Record<string, number>>({});
+  const [fixedPaneWidth, setFixedPaneWidth] = useState<number | null>(null);
+  const resizeSessionRef = useRef<ResizeSession | null>(null);
+  const [resizing, setResizing] = useState(false);
+
+  // 量中间+右侧交互层总宽与行高（曲线层可用宽 = 总宽 − 固定层分配宽）
   useEffect(() => {
-    const el = scrollRef.current;
+    const el = interactionRef.current;
     if (!el) return;
     const ro = new ResizeObserver(() => {
       setSize({ w: Math.max(100, el.clientWidth), h: Math.max(100, el.clientHeight) });
@@ -107,50 +233,69 @@ const WellLogCanvas: React.FC<Props> = ({
     [tracks, data],
   );
 
-  // 内容区布局：固定宽，effectiveWidth=max(natural,viewport)，scale≥1
-  const layout = useMemo(() => {
-    const naturalWidth = activeTracks.reduce((s, t) => s + t.width, 0);
-    const effectiveWidth = naturalWidth > 0 ? Math.max(naturalWidth, size.w) : size.w;
-    const scale = naturalWidth > 0 ? effectiveWidth / naturalWidth : 1;
-    let x = 0;
-    const items = activeTracks.map((cfg) => {
-      const w = cfg.width * scale;
-      const sx = x;
-      x += w;
-      return { cfg, x: sx, width: w };
-    });
-    return { items, naturalWidth, effectiveWidth };
-  }, [activeTracks, size.w]);
-
-  // 分组表头（连续同 group）
-  const groups = useMemo(() => {
-    const out: { label: string; x: number; width: number }[] = [];
-    const items = layout.items;
-    let i = 0;
-    while (i < items.length) {
-      const g = items[i].cfg.group;
-      if (!g) {
-        i++;
-        continue;
-      }
-      let j = i;
-      while (j < items.length && items[j].cfg.group === g) j++;
-      const first = items[i];
-      const last = items[j - 1];
-      out.push({ label: g, x: first.x, width: last.x + last.width - first.x });
-      i = j;
+  const { scrollTracks, fixedTracks } = useMemo(() => {
+    const scroll: AnyTrackConfig[] = [];
+    const fixed: AnyTrackConfig[] = [];
+    for (const t of activeTracks) {
+      if (isRightFixedTrack(t)) fixed.push(t);
+      else scroll.push(t);
     }
-    return out;
-  }, [layout]);
+    return { scrollTracks: scroll, fixedTracks: fixed };
+  }, [activeTracks]);
+
+  const hasScrollTracks = scrollTracks.length > 0;
+  const hasFixedTracks = fixedTracks.length > 0;
+
+  /** 固定层当前逻辑总宽（各列逻辑宽之和，每列 ≥ 配置最小宽）。分界下限与占用宽下限。 */
+  const fixedLogicalTotal = useMemo(
+    () =>
+      fixedTracks.reduce((s, t) => {
+        const key = trackKey(t);
+        const min = minLogicalWidth(t);
+        const stored = logicalWidths[key];
+        return s + (stored != null ? Math.max(min, stored) : min);
+      }, 0),
+    [fixedTracks, logicalWidths],
+  );
+
+  // 固定层分配宽：至少为逻辑总宽（不压缩列）；分配更大时等比向左拉伸；仅无曲线层时吃满整宽
+  const allocatedFixedW = useMemo(() => {
+    if (!hasFixedTracks) return 0;
+    if (!hasScrollTracks) return size.w;
+    // 逻辑总宽优先于 MIN_SCROLL_PANE：固定列不可被压到逻辑宽以下
+    const maxFixed = Math.max(fixedLogicalTotal, size.w - MIN_SCROLL_PANE_PX);
+    const desired = fixedPaneWidth != null ? fixedPaneWidth : fixedLogicalTotal;
+    return Math.min(maxFixed, Math.max(fixedLogicalTotal, desired));
+  }, [hasFixedTracks, hasScrollTracks, size.w, fixedLogicalTotal, fixedPaneWidth]);
+
+  const scrollAvailableW = hasFixedTracks ? Math.max(0, size.w - allocatedFixedW) : size.w;
+
+  const scrollLayout = useMemo(
+    () => buildStretchedLayout(scrollTracks, logicalWidths, scrollAvailableW),
+    [scrollTracks, logicalWidths, scrollAvailableW],
+  );
+  const fixedLayout = useMemo(
+    () => buildStretchedLayout(fixedTracks, logicalWidths, allocatedFixedW),
+    [fixedTracks, logicalWidths, allocatedFixedW],
+  );
+
+  const scrollGroups = useMemo(() => buildGroups(scrollLayout.items), [scrollLayout]);
+  const fixedGroups = useMemo(() => buildGroups(fixedLayout.items), [fixedLayout]);
 
   // 共享几何
-  const hasGroups = groups.length > 0;
+  const hasGroups = scrollGroups.length > 0 || fixedGroups.length > 0;
   const headerBandY = hasGroups ? THEME.groupHeaderH : 0;
   const headerH = THEME.trackHeaderH;
   const contentY = headerBandY + headerH;
   const contentH = Math.max(60, size.h - contentY);
   const [depthTop, depthBottom] = range;
-  const empty = activeTracks.length === 0 || layout.naturalWidth <= 0;
+  const hasScroll = scrollLayout.naturalWidth > 0;
+  const hasFixed = fixedLayout.naturalWidth > 0;
+  const empty = !hasScroll && !hasFixed;
+
+  // 任一内容 SVG 均可反算本地 Y（两侧等高对齐）
+  const pickSvg = (): SVGSVGElement | null =>
+    contentSvgRef.current ?? fixedSvgRef.current;
 
   // RAF 合并 range；rangeRef 供滚轮同帧多次事件读最新值
   const rafRef = useRef<number | null>(null);
@@ -174,19 +319,117 @@ const WellLogCanvas: React.FC<Props> = ({
     [],
   );
 
-  // 滚轮：Shift 横移 → Ctrl 缩放 → 普通纵移（原生 non-passive）
+  // 列宽 / 层间分界拖拽：document 级 move/up，避免指针离开热区中断
   useEffect(() => {
-    const svg = contentSvgRef.current;
-    if (!svg) return;
+    if (!resizing) return;
+    const onMove = (e: PointerEvent): void => {
+      const sess = resizeSessionRef.current;
+      if (!sess) return;
+      if (sess.kind === 'col') {
+        const dDisplay = e.clientX - sess.startClientX;
+        const dLogical = sess.scale > 0 ? dDisplay / sess.scale : dDisplay;
+        const next = Math.max(sess.minW, sess.startLogical + dLogical);
+        setLogicalWidths((prev) => {
+          if (prev[sess.key] === next) return prev;
+          return { ...prev, [sess.key]: next };
+        });
+      } else {
+        // 左拖扩大固定层（clientX↓ → 分配宽↑），右拖缩小
+        const d = sess.startClientX - e.clientX;
+        const next = Math.min(sess.maxFixedW, Math.max(sess.minFixedW, sess.startFixedW + d));
+        setFixedPaneWidth(next);
+      }
+    };
+    const onUp = (): void => {
+      resizeSessionRef.current = null;
+      setResizing(false);
+    };
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp);
+    document.addEventListener('pointercancel', onUp);
+    return () => {
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
+      document.removeEventListener('pointercancel', onUp);
+    };
+  }, [resizing]);
+
+  const beginColResize = useCallback(
+    (e: React.PointerEvent, item: LayoutItem, scale: number): void => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.button !== 0) return;
+      // 中止进行中的框选，避免列头拖拽与图体交互重叠
+      if (selectRef.current) {
+        selectRef.current = null;
+        setSelectBand(null);
+      }
+      setCursorY(null);
+      onCursorLeave?.();
+      const minW = minLogicalWidth(item.cfg);
+      const startLogical = logicalWidths[item.key] != null
+        ? Math.max(minW, logicalWidths[item.key])
+        : minW;
+      resizeSessionRef.current = {
+        kind: 'col',
+        key: item.key,
+        minW,
+        startClientX: e.clientX,
+        startLogical,
+        scale: scale > 0 ? scale : 1,
+      };
+      setResizing(true);
+    },
+    [logicalWidths, onCursorLeave],
+  );
+
+  const beginDividerResize = useCallback(
+    (e: React.PointerEvent): void => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.button !== 0 || !hasFixedTracks || !hasScrollTracks) return;
+      if (selectRef.current) {
+        selectRef.current = null;
+        setSelectBand(null);
+      }
+      setCursorY(null);
+      onCursorLeave?.();
+      // 分界向右缩小不得低于固定层当前逻辑总宽；上限仍保留曲线层最小可用宽（逻辑总宽优先）
+      const maxFixedW = Math.max(fixedLogicalTotal, size.w - MIN_SCROLL_PANE_PX);
+      resizeSessionRef.current = {
+        kind: 'divider',
+        startClientX: e.clientX,
+        startFixedW: allocatedFixedW,
+        minFixedW: fixedLogicalTotal,
+        maxFixedW,
+      };
+      setResizing(true);
+    },
+    [
+      hasFixedTracks,
+      hasScrollTracks,
+      fixedLogicalTotal,
+      size.w,
+      allocatedFixedW,
+      onCursorLeave,
+    ],
+  );
+
+  // 滚轮：挂在中间+右侧交互层，Shift 横移 → Ctrl 缩放 → 普通纵移（原生 non-passive）
+  useEffect(() => {
+    const el = interactionRef.current;
+    if (!el || empty) return;
     const onWheel = (e: WheelEvent): void => {
       e.preventDefault();
-      // Shift+滚轮：横向平移轨道（优先于 Ctrl，不改 range）
+      // Shift+滚轮：横向平移可滚动轨道（优先于 Ctrl，不改 range）
       if (e.shiftKey) {
         const dx = e.deltaX !== 0 ? e.deltaX : e.deltaY;
         const sc = scrollRef.current;
         if (sc) sc.scrollLeft += dx;
         return;
       }
+      const svg = pickSvg();
+      if (!svg) return;
       const [top, bot] = rangeRef.current;
       const span = bot - top;
       if (e.ctrlKey) {
@@ -226,24 +469,28 @@ const WellLogCanvas: React.FC<Props> = ({
         scheduleRange([nt, nb]);
       }
     };
-    svg.addEventListener('wheel', onWheel, { passive: false });
-    return () => svg.removeEventListener('wheel', onWheel);
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
   }, [contentY, contentH, data, onRangeChange, empty]);
 
-  // 十字光标 + 深度读数（无左键拖拽 range）；区间模式下叠加框选带
+  // 十字光标 + 深度读数；区间模式下叠加框选带（中间与右侧同一交互层）
+  // 列宽拖拽中跳过，避免与热区冲突
   const onPointerDown = (e: React.PointerEvent): void => {
+    if (resizing || resizeSessionRef.current) return;
     if (!intervalSelectMode || e.button !== 0) return;
-    const svg = contentSvgRef.current;
-    if (!svg) return;
+    const svg = pickSvg();
+    const host = interactionRef.current;
+    if (!svg || !host) return;
     const localY = clientToSvgY(svg, e.clientY);
     if (localY == null || localY < contentY || localY > contentY + contentH) return;
     selectRef.current = { startY: localY, endY: localY, pointerId: e.pointerId };
     setSelectBand({ y0: localY, y1: localY });
-    svg.setPointerCapture(e.pointerId);
+    host.setPointerCapture(e.pointerId);
   };
 
   const onPointerMove = (e: React.PointerEvent): void => {
-    const svg = contentSvgRef.current;
+    if (resizing || resizeSessionRef.current) return;
+    const svg = pickSvg();
     if (!svg) return;
     const localY = clientToSvgY(svg, e.clientY);
     if (localY == null) {
@@ -271,7 +518,7 @@ const WellLogCanvas: React.FC<Props> = ({
     const sel = selectRef.current;
     if (!sel) return;
     selectRef.current = null;
-    contentSvgRef.current?.releasePointerCapture?.(sel.pointerId);
+    interactionRef.current?.releasePointerCapture?.(sel.pointerId);
     setSelectBand(null);
     if (!onIntervalSelect) return;
     if (isDragTooSmall(sel.startY, sel.endY)) return;
@@ -289,12 +536,127 @@ const WellLogCanvas: React.FC<Props> = ({
     if (selectRef.current) {
       selectRef.current = null;
       setSelectBand(null);
-      contentSvgRef.current?.releasePointerCapture?.(e.pointerId);
+      interactionRef.current?.releasePointerCapture?.(e.pointerId);
     }
   };
 
   const cursorDepth =
     cursorY != null ? yToDepth(cursorY, depthTop, depthBottom, contentY, contentH) : null;
+
+  const makeTrackProps = (it: LayoutItem): TrackProps => ({
+    cfg: it.cfg,
+    data,
+    width: it.width,
+    depthTop,
+    depthBottom,
+    headerBandY,
+    headerH,
+    contentY,
+    contentH,
+    curveRange: it.cfg.type === 'curves' ? curveRanges?.[it.cfg.curveNames[0]] : undefined,
+    // 列宽拖拽中不打开副曲线菜单
+    onOpenCurveMenu: resizing ? undefined : onOpenCurveMenu,
+    // 仅编辑模式透传右键双击；关闭时 undefined，块不响应右键编辑
+    onIntervalBlockRightDoubleClick: intervalSelectMode
+      ? onIntervalBlockRightDoubleClick
+      : undefined,
+  });
+
+  const renderPaneSvg = (
+    layout: PaneLayout,
+    groups: { label: string; x: number; width: number }[],
+    svgRef: React.Ref<SVGSVGElement>,
+    includePatterns: boolean,
+  ): React.ReactElement => (
+    <svg
+      ref={svgRef}
+      width={layout.effectiveWidth}
+      height={size.h}
+      style={{ display: 'block', touchAction: 'none' }}
+    >
+      {includePatterns && (
+        <defs>
+          {Object.entries(PATTERNS).map(([id, p]) => (
+            <pattern key={id} id={id} patternUnits="userSpaceOnUse" width={p.w} height={p.h}>
+              <image href={p.url} x={0} y={0} width={p.w} height={p.h} preserveAspectRatio="xMidYMid slice" />
+            </pattern>
+          ))}
+        </defs>
+      )}
+
+      {hasGroups &&
+        groups.map((g) => (
+          <g key={g.label}>
+            <rect
+              x={g.x}
+              y={0}
+              width={g.width}
+              height={THEME.groupHeaderH}
+              fill={THEME.headerBg}
+              stroke={THEME.border}
+            />
+            <text
+              x={g.x + g.width / 2}
+              y={THEME.groupHeaderH / 2}
+              fontSize={15}
+              fontWeight={700}
+              textAnchor="middle"
+              dominantBaseline="middle"
+              fill={THEME.text}
+              fontFamily={THEME.fontFamily}
+            >
+              {g.label}
+            </text>
+          </g>
+        ))}
+
+      {layout.items.map((it, i) => (
+        <g key={`${it.key}-${i}`} transform={`translate(${it.x},0)`}>
+          {renderTrack(makeTrackProps(it))}
+        </g>
+      ))}
+
+      {/* 列头右边界拖拽热区（仅表头高度；阻止冒泡以免触发框选/十字） */}
+      {layout.items.map((it) => (
+        <rect
+          key={`resize-${it.key}`}
+          x={it.x + it.width - COL_RESIZE_HANDLE_PX}
+          y={headerBandY}
+          width={COL_RESIZE_HANDLE_PX * 2}
+          height={headerH}
+          fill="transparent"
+          style={{ cursor: 'col-resize' }}
+          onPointerDown={(e) => beginColResize(e, it, layout.scale)}
+        />
+      ))}
+
+      {selectBand && (
+        <rect
+          x={0}
+          y={Math.min(selectBand.y0, selectBand.y1)}
+          width={layout.effectiveWidth}
+          height={Math.max(1, Math.abs(selectBand.y1 - selectBand.y0))}
+          fill="rgba(37, 99, 235, 0.18)"
+          stroke="#2563eb"
+          strokeWidth={1}
+          pointerEvents="none"
+        />
+      )}
+
+      {cursorY != null && (
+        <line
+          x1={0}
+          y1={cursorY}
+          x2={layout.effectiveWidth}
+          y2={cursorY}
+          stroke="#ef4444"
+          strokeWidth={1}
+          strokeDasharray="4 3"
+          pointerEvents="none"
+        />
+      )}
+    </svg>
+  );
 
   const depthCol = (
     <svg width={TRACK_WIDTH.depth} height={size.h} style={{ display: 'block' }}>
@@ -329,108 +691,77 @@ const WellLogCanvas: React.FC<Props> = ({
     </svg>
   );
 
+  const interactionCursor = resizing
+    ? 'col-resize'
+    : intervalSelectMode
+      ? 'ns-resize'
+      : 'crosshair';
+
   return (
     <div className="flex h-full w-full">
       {/* 固定左列：深度尺（不随横向滚动） */}
       <div className="flex-shrink-0">{depthCol}</div>
 
-      {/* 右侧：横向滚动内容区 */}
+      {/* 曲线层 + 右侧固定层：共享指针/滚轮交互 */}
       <div
-        ref={scrollRef}
-        className="flex-1 overflow-x-auto overflow-y-hidden"
-        style={{ cursor: intervalSelectMode ? 'ns-resize' : 'crosshair' }}
+        ref={interactionRef}
+        className="flex min-w-0 flex-1 h-full"
+        style={{ cursor: interactionCursor }}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerCancel}
+        onPointerLeave={() => {
+          if (!selectRef.current && !resizeSessionRef.current) {
+            setCursorY(null);
+            onCursorLeave?.();
+          }
+        }}
       >
-        {empty ? (
-          <div className="w-full h-full flex items-center justify-center text-slate-400 text-sm">
-            暂无可滚动轨道（请在右侧勾选曲线）
-          </div>
-        ) : (
-          <svg
-            ref={contentSvgRef}
-            width={layout.effectiveWidth}
-            height={size.h}
-            style={{ display: 'block', touchAction: 'none' }}
-            onPointerDown={onPointerDown}
-            onPointerMove={onPointerMove}
-            onPointerUp={onPointerUp}
-            onPointerCancel={onPointerCancel}
-            onPointerLeave={() => {
-              if (!selectRef.current) {
-                setCursorY(null);
-                onCursorLeave?.();
-              }
-            }}
-          >
-            <defs>
-              {Object.entries(PATTERNS).map(([id, p]) => (
-                <pattern key={id} id={id} patternUnits="userSpaceOnUse" width={p.w} height={p.h}>
-                  <image href={p.url} x={0} y={0} width={p.w} height={p.h} preserveAspectRatio="xMidYMid slice" />
-                </pattern>
-              ))}
-            </defs>
+        {/* 曲线层：自动拉伸至固定层左边界 */}
+        <div
+          ref={scrollRef}
+          className="min-w-0 overflow-x-auto overflow-y-hidden"
+          style={{
+            width: hasFixed ? scrollAvailableW : undefined,
+            flex: hasFixed ? '0 0 auto' : '1 1 0%',
+            minWidth: 0,
+          }}
+        >
+          {empty || !hasScroll ? (
+            <div className="w-full h-full flex items-center justify-center text-slate-400 text-sm">
+              {empty ? '暂无轨道数据' : '暂无可滚动轨道（请在右侧勾选曲线）'}
+            </div>
+          ) : (
+            renderPaneSvg(scrollLayout, scrollGroups, contentSvgRef, false)
+          )}
+        </div>
 
-            {hasGroups &&
-              groups.map((g) => (
-                <g key={g.label}>
-                  <rect x={g.x} y={0} width={g.width} height={THEME.groupHeaderH} fill={THEME.headerBg} stroke={THEME.border} />
-                  <text
-                    x={g.x + g.width / 2}
-                    y={THEME.groupHeaderH / 2}
-                    fontSize={15}
-                    fontWeight={700}
-                    textAnchor="middle"
-                    dominantBaseline="middle"
-                    fill={THEME.text}
-                    fontFamily={THEME.fontFamily}
-                  >
-                    {g.label}
-                  </text>
-                </g>
-              ))}
-
-            {layout.items.map((it, i) => {
-              const p: TrackProps = {
-                cfg: it.cfg,
-                data,
-                width: it.width,
-                depthTop,
-                depthBottom,
-                headerBandY,
-                headerH,
-                contentY,
-                contentH,
-                curveRange:
-                  it.cfg.type === 'curves' ? curveRanges?.[it.cfg.curveNames[0]] : undefined,
-                onOpenCurveMenu,
-                // 仅编辑模式透传右键双击；关闭时 undefined，块不响应右键编辑
-                onIntervalBlockRightDoubleClick: intervalSelectMode
-                  ? onIntervalBlockRightDoubleClick
-                  : undefined,
-              };
-              return (
-                <g key={`${it.cfg.type}-${it.cfg.label}-${i}`} transform={`translate(${it.x},0)`}>
-                  {renderTrack(p)}
-                </g>
-              );
-            })}
-
-            {selectBand && (
-              <rect
-                x={0}
-                y={Math.min(selectBand.y0, selectBand.y1)}
-                width={layout.effectiveWidth}
-                height={Math.max(1, Math.abs(selectBand.y1 - selectBand.y0))}
-                fill="rgba(37, 99, 235, 0.18)"
-                stroke="#2563eb"
-                strokeWidth={1}
-                pointerEvents="none"
+        {/* 右侧固定：组 / 段 / 岩性 / 微相 / 亚相 / 相（右贴齐，按分配宽向左拉伸） */}
+        {hasFixed && (
+          <div className="relative flex-shrink-0" style={{ width: allocatedFixedW }}>
+            {/* SVG 内容裁剪；分界手柄放在外层，避免 overflow 裁掉左半热区 */}
+            <div className="h-full w-full overflow-hidden border-l border-slate-300">
+              {renderPaneSvg(fixedLayout, fixedGroups, fixedSvgRef, true)}
+            </div>
+            {/* 层间分界：仅固定层最左边界；10px 热区跨边界，有曲线层时才可拖 */}
+            {hasScrollTracks && (
+              <div
+                role="separator"
+                aria-orientation="vertical"
+                aria-label="固定层宽度"
+                className="absolute z-10"
+                style={{
+                  left: -COL_RESIZE_HANDLE_PX,
+                  top: headerBandY,
+                  width: COL_RESIZE_HANDLE_PX * 2,
+                  height: headerH,
+                  cursor: 'col-resize',
+                }}
+                onPointerDown={beginDividerResize}
               />
             )}
-
-            {cursorY != null && (
-              <line x1={0} y1={cursorY} x2={layout.effectiveWidth} y2={cursorY} stroke="#ef4444" strokeWidth={1} strokeDasharray="4 3" pointerEvents="none" />
-            )}
-          </svg>
+          </div>
         )}
       </div>
     </div>
